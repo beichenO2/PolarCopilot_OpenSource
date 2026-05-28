@@ -1,0 +1,29 @@
+node_modules/
+dist/
+*.tsbuildinfo
+.DS_Store
+
+# 运行时数据
+.planning/hub/
+.planning/logs/
+.planning/reports/
+.planning/signals/
+.planning/proxy-system-prompt.md
+
+# Cursor 本地配置（保留 skills 和 rules 源码）
+.cursor/*
+!.cursor/skills/
+!.cursor/rules/
+
+# 临时文件
+/tmp/gsd2-session-*
+config.json
+
+# 嵌套的自我克隆（代理可能在项目内克隆自己）
+gsd-2/
+.env
+*.sqlite
+__pycache__/
+*.pyc
+.planning/sync-log.jsonl
+项目字典

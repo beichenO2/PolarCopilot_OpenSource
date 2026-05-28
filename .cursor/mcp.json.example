@@ -1,0 +1,15 @@
+{
+  "mcpServers": {
+    "hub-agent-1": {
+      "command": "node",
+      "args": [
+        "/ABSOLUTE/PATH/TO/PolarCopilot_Opensource/mcp-server/index.mjs"
+      ],
+      "env": {
+        "HUB_SESSION": "1",
+        "HUB_PORT": "8040",
+        "PC_PROJECT_DIR": "/ABSOLUTE/PATH/TO/PolarCopilot_Opensource"
+      }
+    }
+  }
+}

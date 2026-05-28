@@ -1,0 +1,12 @@
+node_modules/
+dist/
+.planning/
+*.sqlite
+*.sqlite-*
+.DS_Store
+.cursor/mcp.json
+hub/.data/
+hub/config.json
+*.log
+.env
+.env.*
