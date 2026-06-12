@@ -1,12 +1,61 @@
+# === Polarisor Public Repo — Universal .gitignore ===
+# Copy this to each project being open-sourced
+
+# Dependencies
 node_modules/
-dist/
-.planning/
-*.sqlite
-*.sqlite-*
-.DS_Store
-.cursor/mcp.json
-hub/.data/
-hub/config.json
-*.log
+.pnpm-store/
+__pycache__/
+*.pyc
+.venv/
+venv/
+
+# Environment & Secrets
 .env
 .env.*
+*.secret
+*.key
+*.pem
+credentials*
+tokens*
+config.local.*
+
+# Databases & Data
+*.sqlite
+*.db
+data/
+*.jsonl
+
+# Internal Planning & Management
+.planning/
+.sotagent-outbox/
+任务书/
+_reports/
+knowledge/crystals/
+
+# Build Artifacts
+dist/
+build/
+out/
+*.tsbuildinfo
+
+# Coverage & test output
+coverage/
+.nyc_output/
+
+# Vendored / upstream third-party copies (large, not ours)
+*-upstream/
+
+# IDE & OS
+.DS_Store
+Thumbs.db
+.cursor/
+.vscode/settings.json
+
+# Logs
+*.log
+logs/
+
+# Archives & Temp
+.archived/
+.clawbin/
+tmp/

@@ -1,0 +1,626 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>PolarCopilot StepFlow v2 — Demo</title>
+  <style>
+    :root {
+      --bg: #1e1e1e;
+      --bg-elevated: #252526;
+      --bg-surface: #2d2d30;
+      --fg: #cccccc;
+      --fg-dim: #858585;
+      --fg-muted: #6a6a6a;
+      --accent: #0078d4;
+      --accent-dim: rgba(0,120,212,0.15);
+      --success: #4ec965;
+      --warning: #cca700;
+      --error: #f14c4c;
+      --border: #3c3c3c;
+      --radius: 6px;
+      --font-mono: 'JetBrains Mono', 'Fira Code', 'Cascadia Code', 'Menlo', monospace;
+      --font-sans: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: var(--font-sans);
+      font-size: 13px;
+      color: var(--fg);
+      background: var(--bg);
+      height: 100vh;
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+    }
+
+    .demo-header {
+      padding: 8px 16px;
+      background: var(--bg-elevated);
+      border-bottom: 1px solid var(--border);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+    .demo-header h1 { font-size: 13px; font-weight: 600; }
+    .demo-header .badge {
+      font-size: 10px;
+      padding: 2px 6px;
+      border-radius: 3px;
+      background: var(--accent-dim);
+      color: var(--accent);
+    }
+
+    .main-container {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+    }
+
+    /* === Step Flow Panel === */
+    .stepflow {
+      flex: 1;
+      overflow-y: auto;
+      padding: 12px 16px;
+      display: flex;
+      flex-direction: column;
+      gap: 2px;
+    }
+
+    .turn {
+      margin-bottom: 12px;
+    }
+    .turn-header {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 6px 0;
+      font-weight: 600;
+      font-size: 12px;
+      color: var(--fg-dim);
+      cursor: pointer;
+      user-select: none;
+    }
+    .turn-header .chevron {
+      font-size: 10px;
+      transition: transform 0.15s;
+    }
+    .turn-header.collapsed .chevron { transform: rotate(-90deg); }
+    .turn-header .turn-title { flex: 1; }
+    .turn-header .turn-duration {
+      font-size: 11px;
+      font-weight: 400;
+      color: var(--fg-muted);
+      font-family: var(--font-mono);
+    }
+
+    /* Step node */
+    .step-tree {
+      padding-left: 16px;
+      border-left: 1px solid var(--border);
+      margin-left: 6px;
+    }
+    .step-node {
+      position: relative;
+      padding: 4px 0 4px 12px;
+    }
+    .step-node::before {
+      content: '';
+      position: absolute;
+      left: -1px;
+      top: 14px;
+      width: 12px;
+      height: 1px;
+      background: var(--border);
+    }
+
+    .step-row {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      padding: 3px 8px;
+      border-radius: 4px;
+      cursor: pointer;
+      transition: background 0.1s;
+    }
+    .step-row:hover { background: var(--bg-surface); }
+
+    .step-icon {
+      width: 16px;
+      height: 16px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 11px;
+      flex-shrink: 0;
+    }
+    .step-icon.running { color: var(--accent); animation: pulse 1.5s infinite; }
+    .step-icon.success { color: var(--success); }
+    .step-icon.error { color: var(--error); }
+    .step-icon.pending { color: var(--fg-muted); }
+    .step-icon.queued { color: var(--fg-muted); opacity: 0.5; }
+
+    @keyframes pulse {
+      0%, 100% { opacity: 1; }
+      50% { opacity: 0.4; }
+    }
+
+    .step-label {
+      font-size: 12px;
+      font-family: var(--font-mono);
+      color: var(--fg);
+      flex: 1;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    .step-meta {
+      font-size: 11px;
+      color: var(--fg-muted);
+      font-family: var(--font-mono);
+      flex-shrink: 0;
+    }
+    .step-detail-label {
+      font-size: 11px;
+      color: var(--fg-dim);
+      margin-left: 22px;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      max-width: 300px;
+    }
+
+    /* Expandable detail */
+    .step-detail {
+      margin-left: 34px;
+      margin-top: 4px;
+      padding: 8px 10px;
+      background: var(--bg-elevated);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      font-size: 12px;
+      font-family: var(--font-mono);
+      line-height: 1.5;
+      color: var(--fg-dim);
+      max-height: 200px;
+      overflow-y: auto;
+      display: none;
+    }
+    .step-detail.expanded { display: block; }
+    .step-detail pre {
+      margin: 0;
+      white-space: pre-wrap;
+      word-break: break-all;
+    }
+
+    /* Response section */
+    .response-block {
+      margin-top: 8px;
+      padding: 12px 14px;
+      background: var(--bg-elevated);
+      border-radius: var(--radius);
+      border: 1px solid var(--border);
+      line-height: 1.6;
+    }
+    .response-block p { margin: 4px 0; }
+    .response-block code {
+      font-family: var(--font-mono);
+      font-size: 12px;
+      background: rgba(255,255,255,0.06);
+      padding: 1px 5px;
+      border-radius: 3px;
+    }
+    .response-block pre {
+      background: rgba(0,0,0,0.3);
+      padding: 10px 12px;
+      border-radius: 4px;
+      margin: 6px 0;
+      overflow-x: auto;
+      font-size: 12px;
+      line-height: 1.4;
+    }
+
+    /* User message */
+    .user-msg {
+      display: flex;
+      align-items: flex-start;
+      gap: 8px;
+      padding: 8px 12px;
+      background: var(--accent-dim);
+      border-radius: var(--radius);
+      margin-bottom: 8px;
+    }
+    .user-msg .avatar {
+      width: 20px;
+      height: 20px;
+      border-radius: 50%;
+      background: var(--accent);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 10px;
+      color: white;
+      font-weight: 700;
+      flex-shrink: 0;
+    }
+    .user-msg .content { font-size: 13px; line-height: 1.5; }
+
+    /* Model badge */
+    .model-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+      padding: 2px 8px;
+      border-radius: 3px;
+      font-size: 10px;
+      font-family: var(--font-mono);
+      background: rgba(78,201,101,0.1);
+      color: var(--success);
+      border: 1px solid rgba(78,201,101,0.2);
+    }
+
+    /* Thinking section */
+    .thinking-section {
+      padding: 4px 12px;
+      margin: 4px 0 4px 16px;
+      border-left: 2px solid rgba(255,255,255,0.08);
+      font-size: 12px;
+      color: var(--fg-dim);
+      font-style: italic;
+      cursor: pointer;
+      max-height: 40px;
+      overflow: hidden;
+      transition: max-height 0.2s;
+    }
+    .thinking-section.expanded { max-height: 400px; overflow-y: auto; font-style: normal; }
+
+    /* Summary bar */
+    .turn-summary {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      padding: 4px 8px;
+      font-size: 11px;
+      color: var(--fg-muted);
+      border-top: 1px solid var(--border);
+      margin-top: 4px;
+    }
+    .turn-summary .stat {
+      display: flex;
+      align-items: center;
+      gap: 3px;
+    }
+
+    /* Input */
+    .input-area {
+      padding: 10px 16px;
+      border-top: 1px solid var(--border);
+      background: var(--bg-elevated);
+      display: flex;
+      gap: 8px;
+      align-items: flex-end;
+    }
+    .input-area textarea {
+      flex: 1;
+      padding: 8px 12px;
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      background: var(--bg);
+      color: var(--fg);
+      font-family: var(--font-sans);
+      font-size: 13px;
+      resize: none;
+      min-height: 36px;
+      max-height: 120px;
+      line-height: 1.4;
+    }
+    .input-area textarea:focus { outline: none; border-color: var(--accent); }
+    .input-area button {
+      padding: 8px 14px;
+      background: var(--accent);
+      color: white;
+      border: none;
+      border-radius: var(--radius);
+      cursor: pointer;
+      font-size: 13px;
+    }
+    .input-area button:hover { opacity: 0.9; }
+
+    /* Controls */
+    .demo-controls {
+      padding: 8px 16px;
+      background: var(--bg-surface);
+      border-top: 1px solid var(--border);
+      display: flex;
+      gap: 8px;
+      flex-wrap: wrap;
+    }
+    .demo-controls button {
+      padding: 4px 10px;
+      background: var(--bg-elevated);
+      border: 1px solid var(--border);
+      border-radius: 4px;
+      color: var(--fg);
+      font-size: 11px;
+      cursor: pointer;
+    }
+    .demo-controls button:hover { background: var(--bg-surface); border-color: var(--accent); }
+    .demo-controls .label {
+      font-size: 11px;
+      color: var(--fg-muted);
+      display: flex;
+      align-items: center;
+    }
+  </style>
+</head>
+<body>
+  <div class="demo-header">
+    <h1>PolarCopilot</h1>
+    <span class="badge">StepFlow v2 Demo</span>
+  </div>
+
+  <div class="main-container">
+    <div class="stepflow" id="stepflow"></div>
+    <div class="input-area">
+      <textarea rows="1" placeholder="Ask anything... (Cmd+Enter to send)"></textarea>
+      <button>↑</button>
+    </div>
+  </div>
+
+  <div class="demo-controls">
+    <span class="label">Demo scenarios:</span>
+    <button onclick="loadScenario('codeEdit')">Code Edit Flow</button>
+    <button onclick="loadScenario('multiTool')">Multi-Tool Chain</button>
+    <button onclick="loadScenario('errorRetry')">Error + Retry</button>
+    <button onclick="loadScenario('subagent')">Subagent Nesting</button>
+    <button onclick="clearAll()">Clear</button>
+  </div>
+
+  <script>
+    const stepflowEl = document.getElementById('stepflow');
+
+    const STATUS = {
+      running: { icon: '●', cls: 'running' },
+      success: { icon: '✓', cls: 'success' },
+      error:   { icon: '✗', cls: 'error' },
+      pending: { icon: '◷', cls: 'pending' },
+      queued:  { icon: '◌', cls: 'queued' },
+    };
+
+    function createStepNode(step) {
+      const st = STATUS[step.status] || STATUS.pending;
+      const hasChildren = step.children && step.children.length > 0;
+      const hasDetail = step.detail;
+
+      let html = `<div class="step-node">
+        <div class="step-row" data-expandable="${hasDetail}">
+          <span class="step-icon ${st.cls}">${st.icon}</span>
+          <span class="step-label">${escapeHtml(step.tool)}</span>
+          ${step.target ? `<span class="step-detail-label">${escapeHtml(step.target)}</span>` : ''}
+          <span class="step-meta">${step.duration || ''}</span>
+        </div>`;
+
+      if (hasDetail) {
+        html += `<div class="step-detail"><pre>${escapeHtml(step.detail)}</pre></div>`;
+      }
+
+      if (hasChildren) {
+        html += `<div class="step-tree">`;
+        for (const child of step.children) {
+          html += createStepNode(child);
+        }
+        html += `</div>`;
+      }
+
+      html += `</div>`;
+      return html;
+    }
+
+    function createTurn(turn) {
+      let html = `<div class="turn">`;
+
+      if (turn.userMsg) {
+        html += `<div class="user-msg">
+          <div class="avatar">U</div>
+          <div class="content">${escapeHtml(turn.userMsg)}</div>
+        </div>`;
+      }
+
+      html += `<div class="turn-header">
+        <span class="chevron">▼</span>
+        <span class="turn-title">${escapeHtml(turn.title)}</span>
+        ${turn.model ? `<span class="model-badge">${escapeHtml(turn.model)}</span>` : ''}
+        <span class="turn-duration">${turn.duration || ''}</span>
+      </div>`;
+
+      if (turn.thinking) {
+        html += `<div class="thinking-section">${escapeHtml(turn.thinking)}</div>`;
+      }
+
+      html += `<div class="step-tree">`;
+      for (const step of turn.steps) {
+        html += createStepNode(step);
+      }
+      html += `</div>`;
+
+      if (turn.summary) {
+        html += `<div class="turn-summary">
+          ${turn.summary.tools ? `<span class="stat">🔧 ${turn.summary.tools} tools</span>` : ''}
+          ${turn.summary.files ? `<span class="stat">📄 ${turn.summary.files} files</span>` : ''}
+          ${turn.summary.duration ? `<span class="stat">⏱ ${turn.summary.duration}</span>` : ''}
+        </div>`;
+      }
+
+      if (turn.response) {
+        html += `<div class="response-block">${turn.response}</div>`;
+      }
+
+      html += `</div>`;
+      return html;
+    }
+
+    function escapeHtml(str) {
+      return str.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+    }
+
+    function renderTurns(turns) {
+      stepflowEl.innerHTML = turns.map(createTurn).join('');
+      bindEvents();
+      stepflowEl.scrollTop = stepflowEl.scrollHeight;
+    }
+
+    function bindEvents() {
+      document.querySelectorAll('.step-row[data-expandable="true"]').forEach(row => {
+        row.addEventListener('click', () => {
+          const detail = row.nextElementSibling;
+          if (detail && detail.classList.contains('step-detail')) {
+            detail.classList.toggle('expanded');
+          }
+        });
+      });
+
+      document.querySelectorAll('.turn-header').forEach(header => {
+        header.addEventListener('click', () => {
+          header.classList.toggle('collapsed');
+          const tree = header.nextElementSibling;
+          if (tree && tree.classList.contains('thinking-section')) {
+            tree.classList.toggle('expanded');
+          }
+          let sibling = header.nextElementSibling;
+          while (sibling && !sibling.classList.contains('turn-header')) {
+            if (sibling.classList.contains('step-tree') ||
+                sibling.classList.contains('turn-summary') ||
+                sibling.classList.contains('response-block')) {
+              sibling.style.display = header.classList.contains('collapsed') ? 'none' : '';
+            }
+            sibling = sibling.nextElementSibling;
+          }
+        });
+      });
+
+      document.querySelectorAll('.thinking-section').forEach(el => {
+        el.addEventListener('click', () => el.classList.toggle('expanded'));
+      });
+    }
+
+    function clearAll() { stepflowEl.innerHTML = ''; }
+
+    const SCENARIOS = {
+      codeEdit: [
+        {
+          userMsg: '帮我把 SidebarProvider 的 streamEvent 处理改为层级展示',
+          title: 'Editing SidebarProvider.ts',
+          model: 'claude-4.6-sonnet',
+          duration: '4.2s',
+          thinking: 'User wants hierarchical display of stream events in SidebarProvider. I need to: 1) Read current implementation 2) Understand event structure 3) Design tree-based rendering 4) Apply edits...',
+          steps: [
+            { tool: 'read_file', target: 'polarcop-vscode/src/sidebar/SidebarProvider.ts', status: 'success', duration: '0.1s',
+              detail: 'Read 909 lines, identified streamEvent handler at line 846-858' },
+            { tool: 'read_file', target: 'polarcop-vscode/src/api/client.ts', status: 'success', duration: '0.1s',
+              detail: 'Found StreamEvent interface: { type, round?, tool?, call_id?, duration_ms?, success? }' },
+            { tool: 'edit_file', target: 'polarcop-vscode/src/sidebar/SidebarProvider.ts', status: 'success', duration: '0.3s',
+              detail: 'Added CSS for .stepflow-panel, .step-node, .step-tree (lines 380-450)\nAdded createStepNode() JS function\nModified streamEvent handler to build tree structure' },
+            { tool: 'terminal', target: 'npx tsc --noEmit', status: 'success', duration: '1.8s',
+              detail: 'TypeScript compilation: 0 errors, 0 warnings' },
+            { tool: 'terminal', target: 'npx @vscode/vsce package', status: 'success', duration: '2.1s',
+              detail: 'Packaged: polarcop-vscode-0.3.8.vsix (11 files, 32.1 KB)' },
+          ],
+          summary: { tools: 5, files: 1, duration: '4.2s' },
+          response: '<p>Done. The <code>streamEvent</code> handler now renders a collapsible tree panel showing each thinking round and tool call hierarchically. Click any step to expand its detail.</p>',
+        }
+      ],
+      multiTool: [
+        {
+          userMsg: '调研一下项目里哪些文件引用了 PolarClaw，然后统一重命名接口',
+          title: 'Codebase search + batch rename',
+          model: 'claude-4.6-sonnet',
+          duration: '8.7s',
+          thinking: 'Need to find all references to PolarClaw interface names across the monorepo, then plan a consistent rename. Will use glob + grep first, then batch edit.',
+          steps: [
+            { tool: 'glob', target: '**/*.ts', status: 'success', duration: '0.2s',
+              detail: 'Found 47 TypeScript files across 6 packages' },
+            { tool: 'grep', target: '"PolarClaw" across workspace', status: 'success', duration: '0.4s',
+              detail: '23 matches in 8 files:\n- PolarClaw/src/main.ts (7)\n- PolarCopilot/polarcop-vscode/src/api/client.ts (4)\n- Agent_core/src/bridge.ts (3)\n- ...' },
+            { tool: 'read_file', target: 'PolarClaw/src/main.ts', status: 'success', duration: '0.1s' },
+            { tool: 'read_file', target: 'PolarCopilot/polarcop-vscode/src/api/client.ts', status: 'success', duration: '0.1s' },
+            { tool: 'edit_file', target: 'PolarClaw/src/main.ts', status: 'success', duration: '0.3s',
+              detail: 'Renamed: PolarClawClient → AgentBridge (3 occurrences)' },
+            { tool: 'edit_file', target: 'PolarCopilot/polarcop-vscode/src/api/client.ts', status: 'success', duration: '0.2s',
+              detail: 'Renamed: PolarClawClient → AgentBridge (4 occurrences)\nUpdated import path' },
+            { tool: 'edit_file', target: 'Agent_core/src/bridge.ts', status: 'success', duration: '0.2s' },
+            { tool: 'terminal', target: 'npx tsc --noEmit --project tsconfig.json', status: 'success', duration: '3.1s',
+              detail: '0 errors across all packages' },
+            { tool: 'terminal', target: 'git diff --stat', status: 'success', duration: '0.1s',
+              detail: '8 files changed, 23 insertions(+), 23 deletions(-)' },
+          ],
+          summary: { tools: 9, files: 8, duration: '8.7s' },
+          response: '<p>Renamed <code>PolarClawClient</code> to <code>AgentBridge</code> across 8 files (23 replacements). All type checks pass.</p>',
+        }
+      ],
+      errorRetry: [
+        {
+          userMsg: '运行测试并修复失败的用例',
+          title: 'Test run + fix cycle',
+          model: 'claude-4.6-sonnet',
+          duration: '12.3s',
+          steps: [
+            { tool: 'terminal', target: 'npm test', status: 'error', duration: '4.2s',
+              detail: 'FAIL src/auth.test.ts\n  ✗ should validate token expiry (AssertionError: expected 401 but got 200)\n  ✓ should reject invalid tokens\n  ✓ should accept valid tokens\n\n1 failed, 2 passed' },
+            { tool: 'read_file', target: 'src/auth.test.ts', status: 'success', duration: '0.1s',
+              detail: 'Line 45: expect(res.status).toBe(401) — test expects expired token to be rejected' },
+            { tool: 'read_file', target: 'src/auth/middleware.ts', status: 'success', duration: '0.1s',
+              detail: 'Found issue: tokenExpiry check uses > instead of >= (off-by-one at boundary)' },
+            { tool: 'edit_file', target: 'src/auth/middleware.ts', status: 'success', duration: '0.2s',
+              detail: 'Line 23: changed `if (now > token.exp)` → `if (now >= token.exp)`' },
+            { tool: 'terminal', target: 'npm test', status: 'success', duration: '3.8s',
+              detail: 'PASS src/auth.test.ts\n  ✓ should validate token expiry\n  ✓ should reject invalid tokens\n  ✓ should accept valid tokens\n\n3 passed, 0 failed' },
+          ],
+          summary: { tools: 5, files: 1, duration: '12.3s' },
+          response: '<p>Fixed off-by-one bug in token expiry check. The middleware was using <code>></code> instead of <code>>=</code>, allowing requests at the exact expiry timestamp to pass through. All 3 tests now pass.</p>',
+        }
+      ],
+      subagent: [
+        {
+          userMsg: '创建用户注册功能，包括前后端',
+          title: 'Feature: User registration (multi-step)',
+          model: 'claude-4.6-sonnet',
+          duration: '22.1s',
+          thinking: 'This is a full-stack feature requiring: API route, database schema, validation, frontend form. Will break into sequential sub-tasks.',
+          steps: [
+            { tool: 'read_file', target: 'src/db/schema.ts', status: 'success', duration: '0.1s' },
+            { tool: 'edit_file', target: 'src/db/schema.ts', status: 'success', duration: '0.2s',
+              detail: 'Added users table schema: id, email, passwordHash, createdAt, verified' },
+            { tool: 'edit_file', target: 'src/db/migrations/002_users.sql', status: 'success', duration: '0.1s',
+              detail: 'Created migration file' },
+            { tool: 'edit_file', target: 'src/api/routes/auth.ts', status: 'success', duration: '0.3s',
+              detail: 'POST /api/auth/register — validates email/password, hashes, inserts, returns JWT',
+              children: [
+                { tool: 'read_file', target: 'src/api/middleware/validate.ts', status: 'success', duration: '0.1s' },
+                { tool: 'edit_file', target: 'src/api/validators/auth.ts', status: 'success', duration: '0.1s',
+                  detail: 'Zod schema: email (valid format), password (min 8, 1 uppercase, 1 number)' },
+              ]
+            },
+            { tool: 'edit_file', target: 'web/src/pages/RegisterPage.tsx', status: 'success', duration: '0.4s',
+              detail: 'React form: email + password + confirm + submit\nClient-side validation matching server schema\nError display + loading state' },
+            { tool: 'edit_file', target: 'web/src/App.tsx', status: 'success', duration: '0.1s',
+              detail: 'Added /register route' },
+            { tool: 'terminal', target: 'npx tsc --noEmit', status: 'success', duration: '2.8s' },
+            { tool: 'terminal', target: 'npm run test:api -- --grep "register"', status: 'success', duration: '3.1s',
+              detail: '4 tests passed:\n  ✓ rejects invalid email\n  ✓ rejects weak password\n  ✓ creates user successfully\n  ✓ rejects duplicate email' },
+          ],
+          summary: { tools: 10, files: 6, duration: '22.1s' },
+          response: '<p>User registration complete:</p><p>Backend: <code>POST /api/auth/register</code> with Zod validation + bcrypt + JWT<br>Frontend: <code>/register</code> page with real-time validation<br>Database: <code>users</code> table with migration<br>Tests: 4 API tests passing</p>',
+        }
+      ],
+    };
+
+    function loadScenario(name) {
+      const turns = SCENARIOS[name];
+      if (turns) renderTurns(turns);
+    }
+
+    loadScenario('codeEdit');
+  </script>
+</body>
+</html>

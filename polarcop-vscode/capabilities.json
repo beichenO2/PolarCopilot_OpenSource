@@ -1,0 +1,81 @@
+{
+  "project": "polarclaw-vscode",
+  "version": "0.1.0",
+  "capabilities": [
+    {
+      "id": "polarclaw-vscode.sidebar.chat",
+      "service_name": "polarclaw.chat",
+      "description": "侧边栏 WebView 对话面板 — 用户与 PolarClaw Agent 的 IDE 内聊天界面",
+      "transport": "vscode-webview",
+      "view_type": "polarclaw.chat",
+      "idempotent": false,
+      "side_effects": true,
+      "timeout_ms": 120000
+    },
+    {
+      "id": "polarclaw-vscode.command.openChat",
+      "service_name": "polarclaw.openChat",
+      "description": "打开 PolarClaw 侧边栏对话面板",
+      "transport": "vscode-command",
+      "command": "polarclaw.openChat",
+      "idempotent": true,
+      "side_effects": false,
+      "timeout_ms": 5000
+    },
+    {
+      "id": "polarclaw-vscode.command.sendSelection",
+      "service_name": "polarclaw.sendSelection",
+      "description": "将编辑器选中的代码文本发送到 PolarClaw 对话面板",
+      "transport": "vscode-command",
+      "command": "polarclaw.sendSelection",
+      "idempotent": false,
+      "side_effects": true,
+      "timeout_ms": 5000
+    },
+    {
+      "id": "polarclaw-vscode.http.chat",
+      "service_name": "polarclaw-api-client",
+      "description": "向 PolarClaw 后端 POST /api/chat 发送对话消息，SSE 流式接收响应",
+      "transport": "http",
+      "endpoint": "/api/chat",
+      "method": "POST",
+      "idempotent": false,
+      "side_effects": true,
+      "timeout_ms": 120000,
+      "headers": {
+        "X-Entry-Type": "ide",
+        "Accept": "text/event-stream"
+      }
+    },
+    {
+      "id": "polarclaw-vscode.http.health",
+      "service_name": "polarclaw-api-client",
+      "description": "健康检查 — GET /health 确认 PolarClaw 后端可达",
+      "transport": "http",
+      "endpoint": "/health",
+      "method": "GET",
+      "idempotent": true,
+      "side_effects": false,
+      "timeout_ms": 5000
+    },
+    {
+      "id": "polarclaw-vscode.config.serverUrl",
+      "service_name": "polarclaw-config",
+      "description": "可配置的 PolarClaw 后端服务地址，默认 http://localhost:3910",
+      "transport": "vscode-setting",
+      "setting": "polarcop.serverUrl",
+      "type": "string",
+      "default": "http://localhost:3910"
+    },
+    {
+      "id": "polarclaw-vscode.config.entryType",
+      "service_name": "polarclaw-config",
+      "description": "入口类型 — 决定 PolarClaw 加载的提示词模板（ide/web）",
+      "transport": "vscode-setting",
+      "setting": "polarclaw.entryType",
+      "type": "enum",
+      "enum": ["ide", "web"],
+      "default": "ide"
+    }
+  ]
+}

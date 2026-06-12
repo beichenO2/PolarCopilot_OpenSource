@@ -1,0 +1,23 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "LobsterEvent",
+  "description": "Hub lobster inbox-outbox event format. Semantically compatible with SOTAgent inbox-outbox.schema.json.",
+  "type": "object",
+  "required": ["id", "source", "target", "type", "payload", "timestamp"],
+  "properties": {
+    "id": { "type": "string", "description": "Unique event ID (UUID recommended)" },
+    "source": { "type": "string", "description": "Source project or agent name" },
+    "target": { "type": "string", "description": "Target project or agent name" },
+    "type": {
+      "type": "string",
+      "enum": ["event", "command", "response", "notification"],
+      "description": "Message type"
+    },
+    "payload": { "type": "object", "description": "Message body, format varies by type" },
+    "timestamp": { "type": "string", "format": "date-time" },
+    "target_agent_id": { "type": "string", "description": "If set, route to this agent's .inbox topic" },
+    "target_topic": { "type": "string", "description": "Override topic (default: {target_agent_id}.inbox)" },
+    "ttl_seconds": { "type": "integer", "minimum": 0, "description": "Message TTL in seconds" }
+  },
+  "additionalProperties": false
+}

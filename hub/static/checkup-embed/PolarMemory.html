@@ -1,0 +1,19 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>PolarMemory — 检修入口</title>
+  <style>
+    body { font-family: system-ui, sans-serif; margin: 2rem; color: #1a1a2e; }
+    code { background: #f1f5f9; padding: 0.15rem 0.4rem; border-radius: 4px; }
+  </style>
+</head>
+<body>
+  <h1>PolarMemory</h1>
+  <p>记忆块 API — 控制台入口</p>
+  <p>使用右下角 <strong>检修</strong> 按钮提交问题（截图+批注+描述），路由至 <code>@checkup-agent</code>。</p>
+  <script type="module" src="/checkup-widget/checkup-widget.es.js"></script>
+  <polar-checkup data-project="PolarMemory" data-position="bottom-right"></polar-checkup>
+</body>
+</html>

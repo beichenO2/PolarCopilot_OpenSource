@@ -1,0 +1,14 @@
+{
+  "id": "550e8400-e29b-41d4-a716-446655440000",
+  "source": "SOTAgent",
+  "target": "KnowLever",
+  "type": "command",
+  "payload": {
+    "action": "rebuild_topic",
+    "topic": "pharm-test",
+    "options": { "force": false }
+  },
+  "timestamp": "2026-05-09T10:30:00.000Z",
+  "target_agent_id": "sw-20260509103000",
+  "ttl_seconds": 3600
+}

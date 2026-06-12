@@ -1,6 +1,0 @@
-{
-  "markdown.preview.securityLevel": "allowLocalImages",
-  "workbench.editorAssociations": {
-    "*.md": "vscode.markdown.preview.editor"
-  }
-}

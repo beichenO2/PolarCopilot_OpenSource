@@ -1,8 +1,31 @@
 import { Component, type ReactNode } from 'react'
-import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom'
+import { BrowserRouter, Routes, Route } from 'react-router-dom'
 import { Layout } from './components/Layout'
+import { DashboardPage } from './pages/DashboardPage'
 import { PromptsPage } from './pages/PromptsPage'
 import { YoloPage } from './pages/YoloPage'
+import { EvolutionPage } from './pages/EvolutionPage'
+import { SSOTPage } from './pages/SSOTPage'
+import { PilotPage } from './pages/PilotPage'
+import ProlusionPage from './pages/ProlusionPage'
+import { StartAgentPage } from './pages/StartAgentPage'
+import { CheckupEventsPage } from './pages/CheckupEventsPage'
+// Self-host the checkup widget (dogfood). Side-effect import registers the
+// <polar-checkup> custom element so the JSX tag below works.
+import './checkup'
+
+declare module 'react' {
+  // Allow <polar-checkup> in JSX with the data-* attributes we expose.
+  namespace JSX {
+    interface IntrinsicElements {
+      'polar-checkup': React.DetailedHTMLProps<React.HTMLAttributes<HTMLElement>, HTMLElement> & {
+        'data-project'?: string
+        'data-hub-url'?: string
+        'data-position'?: 'bottom-right' | 'bottom-left' | 'top-right' | 'top-left'
+      }
+    }
+  }
+}
 
 class ErrorBoundary extends Component<{ children: ReactNode }, { error: Error | null }> {
   state: { error: Error | null } = { error: null }
@@ -36,12 +59,23 @@ export default function App() {
       <BrowserRouter basename={basename}>
         <Routes>
           <Route element={<Layout />}>
-            <Route path="/" element={<Navigate to="/prompts" replace />} />
+            <Route path="/" element={<DashboardPage />} />
             <Route path="/prompts" element={<PromptsPage />} />
+            <Route path="/ssot" element={<SSOTPage />} />
+            <Route path="/prolusion" element={<ProlusionPage />} />
             <Route path="/yolo" element={<YoloPage />} />
+            <Route path="/pilot" element={<PilotPage />} />
+            <Route path="/evolution" element={<EvolutionPage />} />
+            <Route path="/start-agent" element={<StartAgentPage />} />
+            <Route path="/checkup-events" element={<CheckupEventsPage />} />
           </Route>
         </Routes>
       </BrowserRouter>
+      {/* Dogfood: same widget that ships to all hosts is also embedded here. */}
+      <polar-checkup
+        data-project="PolarCopilot"
+        data-position="bottom-right"
+      />
     </ErrorBoundary>
   )
 }

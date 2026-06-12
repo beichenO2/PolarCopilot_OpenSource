@@ -1,6 +1,8 @@
 import { useState, useRef, useCallback, useEffect } from 'react'
 import { clsx } from 'clsx'
 import { renderMarkdown } from '../lib/markdown'
+import { api } from '../lib/api'
+import { useTopicsStore } from '../stores/topics'
 import type { Prompt } from '../types/hub'
 import { optionLabel } from '../types/hub'
 
@@ -20,10 +22,73 @@ interface Props {
   savedHeight?: number
   onDraftChange?: (text: string) => void
   onHeightChange?: (height: number) => void
+  onAnnotationsConsumed?: () => void
   onDragStartPrompt?: (prompt: Prompt) => void
 }
 
-export function PromptCard({ prompt, onAnswer, onDismiss, isHistory, linkedPromptId, savedDraft, savedHeight, onDraftChange, onHeightChange, onDragStartPrompt }: Props) {
+function insertTextAtCursor(textarea: HTMLTextAreaElement, text: string): string {
+  const start = textarea.selectionStart
+  const end = textarea.selectionEnd
+  const before = textarea.value.slice(0, start)
+  const after = textarea.value.slice(end)
+  const needSpace = before.length > 0 && !before.endsWith(' ') && !before.endsWith('\n')
+  const insert = (needSpace ? ' ' : '') + text
+  return before + insert + after
+}
+
+type UploadItem = { file: File; relPath: string }
+
+function readEntryFile(entry: FileSystemFileEntry): Promise<File> {
+  return new Promise((resolve, reject) => entry.file(resolve, reject))
+}
+
+// readEntries returns at most ~100 entries per call, so drain until empty.
+function readAllDirEntries(reader: FileSystemDirectoryReader): Promise<FileSystemEntry[]> {
+  return new Promise((resolve, reject) => {
+    const all: FileSystemEntry[] = []
+    const next = () =>
+      reader.readEntries((batch) => {
+        if (batch.length === 0) { resolve(all); return }
+        all.push(...batch)
+        next()
+      }, reject)
+    next()
+  })
+}
+
+async function walkEntry(entry: FileSystemEntry, prefix: string, out: UploadItem[]): Promise<void> {
+  if (entry.isFile) {
+    const file = await readEntryFile(entry as FileSystemFileEntry)
+    out.push({ file, relPath: prefix + entry.name })
+  } else if (entry.isDirectory) {
+    const children = await readAllDirEntries((entry as FileSystemDirectoryEntry).createReader())
+    for (const child of children) await walkEntry(child, `${prefix}${entry.name}/`, out)
+  }
+}
+
+// Expand a drop into upload items. Uses webkitGetAsEntry to recurse into folders;
+// falls back to the flat file list when the entries API is unavailable.
+async function collectUploadItems(entries: FileSystemEntry[], flatFiles: File[]): Promise<UploadItem[]> {
+  if (entries.length > 0) {
+    const out: UploadItem[] = []
+    for (const e of entries) await walkEntry(e, '', out)
+    return out
+  }
+  return flatFiles.map((f) => ({ file: f, relPath: f.name }))
+}
+
+// Convert a pasted absolute path / file:// URI into an @reference. Lets the user
+// paste a path (e.g. Finder ⌥⌘C "Copy as Pathname") to reference a local folder
+// without uploading — browsers don't expose dragged-folder paths for security.
+function pastedPathToRef(line: string): string | null {
+  if (line.startsWith('file://')) {
+    try { return `@${decodeURIComponent(new URL(line).pathname)}` } catch { return null }
+  }
+  if (line.startsWith('/')) return `@${line}`
+  return null
+}
+
+export function PromptCard({ prompt, onAnswer, onDismiss, isHistory, linkedPromptId, savedDraft, savedHeight, onDraftChange, onHeightChange, onAnnotationsConsumed, onDragStartPrompt }: Props) {
   const [customInput, setCustomInput] = useState(savedDraft ?? '')
   const [isComposing, setIsComposing] = useState(false)
   const [annotations, setAnnotations] = useState<Annotation[]>([])
@@ -31,10 +96,14 @@ export function PromptCard({ prompt, onAnswer, onDismiss, isHistory, linkedPromp
   const [annotating, setAnnotating] = useState<{ text: string; range: Range } | null>(null)
   const [annotationNote, setAnnotationNote] = useState('')
   const [popoverPos, setPopoverPos] = useState<{ top: number; left: number }>({ top: 0, left: 0 })
+  const [fileDragOver, setFileDragOver] = useState(false)
+  const [uploadingFiles, setUploadingFiles] = useState(false)
+  const [uploadError, setUploadError] = useState<string | null>(null)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const annTextareaRef = useRef<HTMLTextAreaElement>(null)
   const contentRef = useRef<HTMLDivElement>(null)
   const cardRef = useRef<HTMLDivElement>(null)
+  const fileInputRef = useRef<HTMLInputElement>(null)
 
   const agentLabel = prompt.display_name || prompt.agent_id || 'System'
   const isPending = !prompt.answered && !isHistory
@@ -76,11 +145,42 @@ export function PromptCard({ prompt, onAnswer, onDismiss, isHistory, linkedPromp
   }, [selectedOptions, customInput, annotations, handleAnswer, onDraftChange])
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
-    if (e.key === 'Enter' && (e.metaKey || e.ctrlKey) && !e.shiftKey && !isComposing) {
+    if (e.key === 'Enter' && (e.metaKey || e.ctrlKey) && !isComposing) {
       e.preventDefault()
       buildAndSend()
     }
   }
+
+  const insertRefsText = useCallback((refs: string) => {
+    if (!refs) return
+    if (textareaRef.current) {
+      const newVal = insertTextAtCursor(textareaRef.current, refs)
+      setCustomInput(newVal)
+      onDraftChange?.(newVal)
+    } else {
+      setCustomInput(prev => {
+        const newVal = prev + (prev ? ' ' : '') + refs
+        onDraftChange?.(newVal)
+        return newVal
+      })
+    }
+  }, [onDraftChange])
+
+  const doUpload = useCallback(async (items: UploadItem[]) => {
+    if (items.length === 0) return
+    setUploadingFiles(true)
+    setUploadError(null)
+    try {
+      const result = await api.uploads.upload(items)
+      // One ref per top-level dropped entry: a file → the file, a folder → the folder.
+      insertRefsText((result.roots ?? []).map(r => `@${r.path}`).join(' '))
+    } catch (err) {
+      console.error('File upload failed:', err)
+      setUploadError(err instanceof Error ? err.message : '上传失败，请重试')
+    } finally {
+      setUploadingFiles(false)
+    }
+  }, [insertRefsText])
 
   const hasSendContent = customInput.trim().length > 0 || selectedOptions.size > 0 || annotations.length > 0
 
@@ -224,9 +324,89 @@ export function PromptCard({ prompt, onAnswer, onDismiss, isHistory, linkedPromp
       onDrop={isPending ? (e) => {
         e.preventDefault()
         cardRef.current?.classList.remove('ring-2', 'ring-blue-500/40')
-        const ref = e.dataTransfer.getData('text/plain')?.trim()
-        if (ref) {
-          setCustomInput((prev) => (prev ? `${prev}\n\n${ref}` : ref))
+
+        // Topic drop: consume all annotations in topic, then delete from backend
+        const topicData = e.dataTransfer.getData('application/x-ssot-topic')
+        if (topicData) {
+          try {
+            const topic = JSON.parse(topicData)
+            if (Array.isArray(topic.annotations) && topic.annotations.length > 0) {
+              const newAnns: typeof annotations = topic.annotations.map(
+                (ann: { id: string; project: string; field_path: string; text: string }, i: number) => ({
+                  id: `topic-ann-${ann.id}-${i}`,
+                  text: `[SSoT:${ann.project}/${ann.field_path}] ${topic.name}`,
+                  note: ann.text,
+                }),
+              )
+              setAnnotations(prev => [...prev, ...newAnns])
+
+              // Group by project, delete backend annotations
+              const byProject = new Map<string, Set<string>>()
+              for (const ann of topic.annotations as { project: string; field_path: string }[]) {
+                if (!byProject.has(ann.project)) byProject.set(ann.project, new Set())
+                byProject.get(ann.project)!.add(ann.field_path)
+              }
+              Promise.all(
+                [...byProject.entries()].map(([project, fps]) =>
+                  api.polaris.deleteAnnotationsByFields(project, [...fps]),
+                ),
+              )
+                .then(() => onAnnotationsConsumed?.())
+                .catch(() => {})
+
+              // Remove topic from store after consumption
+              useTopicsStore.getState().removeTopic(topic.id)
+            }
+          } catch {
+            // malformed topic payload, ignore
+          }
+          return
+        }
+
+        // SSoT ref drop (from EcoTree / SSOTSidebar): fetch annotation text before consuming
+        const ref = e.dataTransfer.getData('text/plain')
+        if (ref && ref.includes('[SSoT:')) {
+          const project = e.dataTransfer.getData('application/x-ssot-project')
+          const fieldPaths = e.dataTransfer.getData('application/x-ssot-field-paths')
+
+          if (project && fieldPaths) {
+            const fps = fieldPaths.split(',').filter(Boolean)
+            api.polaris.annotations(project).then(data => {
+              const backendAnns = data.annotations.filter(a => fps.includes(a.field_path))
+              const newAnns: typeof annotations = []
+
+              if (backendAnns.length > 0) {
+                for (const ann of backendAnns) {
+                  const ssotRef = `[SSoT:${project}/${ann.field_path}]`
+                  newAnns.push({ id: `ann-drop-${ann.id}`, text: ssotRef, note: ann.text })
+                }
+              } else {
+                const lines = ref.split('\n').filter(l => l.startsWith('[SSoT:'))
+                for (const line of lines) {
+                  newAnns.push({ id: `ann-drop-${Date.now()}-${newAnns.length}`, text: line, note: '' })
+                }
+              }
+
+              if (newAnns.length > 0) {
+                setAnnotations(prev => [...prev, ...newAnns.filter(a => !prev.some(p => p.id === a.id))])
+              }
+
+              api.polaris.deleteAnnotationsByFields(project, fps)
+                .then(() => onAnnotationsConsumed?.())
+                .catch(() => {})
+            }).catch(() => {})
+          } else {
+            const lines = ref.split('\n').filter(l => l.startsWith('[SSoT:'))
+            const newAnns: typeof annotations = []
+            for (const line of lines) {
+              if (!annotations.some(a => a.text === line) && !newAnns.some(a => a.text === line)) {
+                newAnns.push({ id: `ann-drop-${Date.now()}-${newAnns.length}`, text: line, note: '' })
+              }
+            }
+            if (newAnns.length > 0) {
+              setAnnotations(prev => [...prev, ...newAnns])
+            }
+          }
         }
       } : undefined}
       className={clsx(
@@ -374,26 +554,110 @@ export function PromptCard({ prompt, onAnswer, onDismiss, isHistory, linkedPromp
 
       {/* Unified input + send */}
       {isPending && (
+        <>
         <div className="flex gap-2 items-end mt-1">
-          <textarea
-            ref={textareaRef}
-            value={customInput}
-            onChange={(e) => { setCustomInput(e.target.value); onDraftChange?.(e.target.value) }}
-            onKeyDown={handleKeyDown}
-            onCompositionStart={() => setIsComposing(true)}
-            onCompositionEnd={() => setIsComposing(false)}
-            placeholder="输入回复... (⌘+Enter 发送, Shift+Enter 换行)"
-            rows={2}
-            className="flex-1 bg-hub-bg border border-hub-border rounded-lg px-3 py-2.5 text-[0.9rem] text-hub-text placeholder:text-hub-text-muted max-h-[500px] font-inherit leading-[1.5] focus:outline-none focus:border-hub-accent transition-[border-color] resize-none"
+          <div
+            className={clsx('flex-1 relative', fileDragOver && 'ring-2 ring-blue-400/50 rounded-lg')}
+            onDragOver={(e) => {
+              if (e.dataTransfer.types.includes('Files')) {
+                e.preventDefault()
+                e.dataTransfer.dropEffect = 'copy'
+                setFileDragOver(true)
+              }
+            }}
+            onDragLeave={() => setFileDragOver(false)}
+            onDrop={(e) => {
+              e.preventDefault()
+              e.stopPropagation()
+              setFileDragOver(false)
+              // webkitGetAsEntry is only valid synchronously during the drop event.
+              const entries = e.dataTransfer.items
+                ? Array.from(e.dataTransfer.items)
+                    .map(it => it.webkitGetAsEntry?.() ?? null)
+                    .filter((x): x is FileSystemEntry => x !== null)
+                : []
+              if (entries.some(en => en.isDirectory)) {
+                // Browsers can't expose a dragged folder's local path, and copying
+                // the whole tree is slow. Guide the user to paste the path instead.
+                setUploadError('拖入文件夹无法获取本地路径（浏览器安全限制）。请在访达选中该文件夹按 ⌥⌘C「拷贝为路径名」，再粘贴到输入框——会自动转成 @ 引用，无需上传。')
+                return
+              }
+              const flatFiles = Array.from(e.dataTransfer.files)
+              collectUploadItems(entries, flatFiles).then(doUpload)
+            }}
+          >
+            <textarea
+              ref={textareaRef}
+              value={customInput}
+              onChange={(e) => { setCustomInput(e.target.value); onDraftChange?.(e.target.value) }}
+              onKeyDown={handleKeyDown}
+              onCompositionStart={() => setIsComposing(true)}
+              onCompositionEnd={() => setIsComposing(false)}
+              onPaste={(e) => {
+                const text = e.clipboardData.getData('text/plain')
+                if (!text) return
+                const lines = text.split(/\r?\n/).map(s => s.trim()).filter(Boolean)
+                const refs = lines.map(pastedPathToRef)
+                // Only intercept when every pasted line is an absolute path / file:// URI.
+                if (lines.length > 0 && refs.every((r): r is string => r !== null)) {
+                  e.preventDefault()
+                  setUploadError(null)
+                  insertRefsText(refs.join(' '))
+                }
+              }}
+              placeholder={uploadingFiles ? '上传中...' : '输入回复... (⌘/Ctrl+Enter 发送; 拖文件/📎 上传; 文件夹用 ⌥⌘C 拷贝路径后粘贴)'}
+              rows={2}
+              disabled={uploadingFiles}
+              className="w-full bg-hub-bg border border-hub-border rounded-lg px-3 py-2.5 text-[0.9rem] text-hub-text placeholder:text-hub-text-muted max-h-[500px] font-inherit leading-[1.5] focus:outline-none focus:border-hub-accent transition-[border-color] resize-none"
+            />
+            {fileDragOver && (
+              <div className="absolute inset-0 bg-blue-500/10 border-2 border-dashed border-blue-400/60 rounded-lg flex items-center justify-center pointer-events-none">
+                <span className="text-blue-300 text-sm font-medium">放开以引用文件</span>
+              </div>
+            )}
+          </div>
+          <input
+            ref={fileInputRef}
+            type="file"
+            multiple
+            className="hidden"
+            onChange={(e) => {
+              const files = Array.from(e.target.files ?? [])
+              doUpload(files.map(f => ({ file: f, relPath: f.name })))
+              e.target.value = ''
+            }}
           />
           <button
+            type="button"
+            onClick={() => fileInputRef.current?.click()}
+            disabled={uploadingFiles}
+            title="选择文件上传（拖拽被系统拦截时用这个）"
+            aria-label="附件"
+            className="px-3 py-2.5 text-[1rem] leading-none rounded-lg border border-hub-border bg-hub-bg text-hub-text-muted whitespace-nowrap hover:text-hub-text hover:border-hub-accent disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+          >
+            📎
+          </button>
+          <button
             onClick={buildAndSend}
-            disabled={!hasSendContent}
+            disabled={!hasSendContent || uploadingFiles}
             className="px-5 py-2.5 text-[0.9rem] rounded-lg border border-hub-accent bg-hub-accent-bg text-white whitespace-nowrap hover:opacity-85 disabled:opacity-40 disabled:cursor-not-allowed transition-opacity"
           >
             发送
           </button>
         </div>
+        {uploadError && (
+          <div className="mt-1.5 flex items-start gap-2 text-[0.8rem] text-red-300 bg-red-500/10 border border-red-400/30 rounded-lg px-3 py-2">
+            <span className="flex-1 leading-[1.5]">{uploadError}</span>
+            <button
+              onClick={() => setUploadError(null)}
+              className="text-red-300/70 hover:text-red-200 shrink-0"
+              aria-label="关闭"
+            >
+              ✕
+            </button>
+          </div>
+        )}
+        </>
       )}
 
       {/* History: collapsible full answer */}

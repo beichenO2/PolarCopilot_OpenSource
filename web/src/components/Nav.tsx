@@ -2,8 +2,15 @@ import { NavLink } from 'react-router-dom'
 import { clsx } from 'clsx'
 
 const links = [
+  { to: '/', label: 'Dashboard' },
+  { to: '/start-agent', label: 'Start Agent' },
   { to: '/prompts', label: 'Agent Control' },
+  { to: '/ssot', label: 'SSoT' },
+  { to: '/prolusion', label: 'Prolusion' },
   { to: '/yolo', label: 'YOLO' },
+  { to: '/pilot', label: 'Pilot 状态' },
+  { to: '/evolution', label: 'Evolution' },
+  { to: '/checkup-events', label: '检修历史' },
 ]
 
 export function Nav() {

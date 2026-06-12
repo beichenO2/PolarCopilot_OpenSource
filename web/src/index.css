@@ -109,3 +109,26 @@ body {
 .markdown-body strong {
   color: #e6edf3;
 }
+
+/* SSoT reference links in markdown — normal text style, clickable */
+.ssot-ref {
+  color: #58a6ff;
+  text-decoration: none;
+  cursor: pointer;
+  border-bottom: 1px dotted rgba(88, 166, 255, 0.4);
+  transition: border-color 0.15s;
+}
+.ssot-ref:hover {
+  border-bottom-color: #58a6ff;
+}
+
+/* SSoT jump highlight flash — applied to requirement cards after scroll */
+@keyframes ssot-highlight-flash {
+  0%   { box-shadow: 0 0 0 2px rgba(88, 166, 255, 0.7), 0 0 20px rgba(88, 166, 255, 0.15); }
+  50%  { box-shadow: 0 0 0 2px rgba(88, 166, 255, 0.4), 0 0 12px rgba(88, 166, 255, 0.08); }
+  100% { box-shadow: none; }
+}
+.ssot-highlight-flash {
+  animation: ssot-highlight-flash 1.8s ease-out forwards;
+  border-color: rgba(88, 166, 255, 0.5) !important;
+}

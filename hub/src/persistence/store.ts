@@ -1,6 +1,6 @@
 import { mkdirSync, renameSync, unlinkSync, writeFileSync } from 'node:fs';
 import { dirname, resolve, sep } from 'node:path';
-import { and, eq, gt, inArray, isNull, lte, or, sql } from 'drizzle-orm';
+import { and, eq, gt, inArray, isNull, lte, ne, or, sql } from 'drizzle-orm';
 import { nanoid } from 'nanoid';
 import type { AtomicWriteResult, MessageRow, PlanningDocument } from '../types.js';
 import {
@@ -13,11 +13,14 @@ import {
   messages,
   moduleAffinity,
   pathLeases,
+  pilotProjects,
   planningDocuments,
   reservePool,
   sessions,
+  sotadiffEntries,
   uiPrompts,
   agentSafetyLimits,
+  p22Alerts,
   type HubDb,
 } from './db.js';
 
@@ -68,19 +71,15 @@ export class HubStore {
   }
 
   /**
-   * One-step HTTP registration: create session + first prompt + display_name.
-   * Used by solo-web agents that don't have an MCP session.
+   * Register solo-web agent session only (no initial prompt).
    */
-  registerAndPrompt(params: {
+  registerAgentOnly(params: {
     agentId: string;
     displayName: string;
-    prompt: string;
-    options: string[];
-  }): { ok: true; prompt_id: string } | { ok: false; reason: string } {
+  }): { ok: true } | { ok: false; reason: string } {
     const now = new Date();
     const ALIVE_THRESHOLD_MS = 2 * 60 * 60 * 1000; // 2 hours — must match constants.ts
 
-    // ── Guard: reject if agent_id is already alive (another instance is active) ──
     const existing = this.db.select().from(sessions).where(eq(sessions.agentId, params.agentId)).get();
     if (existing?.lastPingAt) {
       const elapsed = now.getTime() - new Date(existing.lastPingAt).getTime();
@@ -110,6 +109,26 @@ export class HubStore {
       })
       .run();
 
+    return { ok: true };
+  }
+
+  /**
+   * One-step HTTP registration: create session + first prompt + display_name.
+   * Used by solo-web agents that don't have an MCP session.
+   */
+  registerAndPrompt(params: {
+    agentId: string;
+    displayName: string;
+    prompt: string;
+    options: string[];
+  }): { ok: true; prompt_id: string } | { ok: false; reason: string } {
+    const reg = this.registerAgentOnly({
+      agentId: params.agentId,
+      displayName: params.displayName,
+    });
+    if (!reg.ok) return reg;
+
+    const now = new Date();
     const promptId = crypto.randomUUID();
     this.db
       .insert(uiPrompts)
@@ -527,6 +546,194 @@ export class HubStore {
     return matches;
   }
 
+  recordSoTADiff(params: {
+    agentId: string;
+    gitCommit?: string;
+    intent: string;
+    files: { path: string; op: string; lines_changed: number }[];
+    summary: string;
+    mirrorRoot?: string;
+  }): { id: string } {
+    const id = nanoid();
+    const now = Date.now();
+
+    this.db
+      .insert(sotadiffEntries)
+      .values({
+        id,
+        agentId: params.agentId,
+        gitCommit: params.gitCommit ?? null,
+        intent: params.intent,
+        filesJson: JSON.stringify(params.files),
+        summary: params.summary,
+        createdAt: new Date(now),
+      })
+      .run();
+
+    if (params.mirrorRoot) {
+      try {
+        const logPath = resolve(params.mirrorRoot, '.planning/diff/changelog.jsonl');
+        mkdirSync(dirname(logPath), { recursive: true });
+        const entry = JSON.stringify({
+          id, agent_id: params.agentId, git_commit: params.gitCommit,
+          intent: params.intent, files: params.files, summary: params.summary,
+          timestamp: new Date(now).toISOString(),
+        });
+        writeFileSync(logPath, entry + '\n', { flag: 'a' });
+      } catch { /* mirror is best-effort */ }
+    }
+
+    return { id };
+  }
+
+  querySoTADiff(params: {
+    filePath?: string;
+    agentId?: string;
+    limit: number;
+    sinceMs: number;
+  }): Array<Record<string, unknown>> {
+    const since = new Date(Date.now() - params.sinceMs);
+    const conditions = [gt(sotadiffEntries.createdAt, since)];
+    if (params.agentId) {
+      conditions.push(eq(sotadiffEntries.agentId, params.agentId));
+    }
+
+    const rows = this.db
+      .select()
+      .from(sotadiffEntries)
+      .where(and(...conditions))
+      .orderBy(sql`created_at DESC`)
+      .limit(params.limit)
+      .all();
+
+    return rows
+      .filter(r => !params.filePath || (r.filesJson ?? '').includes(params.filePath))
+      .map(r => ({
+        id: r.id,
+        agent_id: r.agentId,
+        git_commit: r.gitCommit,
+        intent: r.intent,
+        files: JSON.parse(r.filesJson ?? '[]'),
+        summary: r.summary,
+        created_at: new Date(r.createdAt).toISOString(),
+      }));
+  }
+
+  // ─── Pilot Project CRUD ───────────────────────────────
+
+  listPilotProjects(): Array<Record<string, unknown>> {
+    return this.db.select().from(pilotProjects).all().map(this.parsePilotRow);
+  }
+
+  getPilotProject(id: string): Record<string, unknown> | undefined {
+    const r = this.db.select().from(pilotProjects).where(eq(pilotProjects.id, id)).get();
+    return r ? this.parsePilotRow(r) : undefined;
+  }
+
+  createPilotProject(params: {
+    name: string;
+    description?: string;
+    inputSpec?: string;
+    outputSpec?: string;
+    createdBy?: string;
+  }): Record<string, unknown> {
+    const id = nanoid();
+    const now = new Date();
+    this.db
+      .insert(pilotProjects)
+      .values({
+        id,
+        name: params.name,
+        description: params.description ?? '',
+        status: 'draft',
+        inputSpec: params.inputSpec ?? '',
+        outputSpec: params.outputSpec ?? '',
+        phasesJson: '[]',
+        assignedAgents: '[]',
+        createdBy: params.createdBy ?? null,
+        createdAt: now,
+        updatedAt: now,
+      })
+      .run();
+    return this.getPilotProject(id)!;
+  }
+
+  updatePilotProjectPhases(id: string, phases: unknown[], agentIds?: string[]): void {
+    const set: Record<string, unknown> = { phasesJson: JSON.stringify(phases), updatedAt: new Date() };
+    if (agentIds) set.assignedAgents = JSON.stringify(agentIds);
+    this.db.update(pilotProjects).set(set).where(eq(pilotProjects.id, id)).run();
+  }
+
+  updatePilotProjectStatus(id: string, status: string): void {
+    const set: Record<string, unknown> = { status, updatedAt: new Date() };
+    if (status === 'running') set.startedAt = new Date();
+    if (status === 'completed') set.completedAt = new Date();
+    this.db.update(pilotProjects).set(set).where(eq(pilotProjects.id, id)).run();
+  }
+
+  updatePilotProjectAgents(id: string, agentIds: string[]): void {
+    this.db
+      .update(pilotProjects)
+      .set({ assignedAgents: JSON.stringify(agentIds), updatedAt: new Date() })
+      .where(eq(pilotProjects.id, id))
+      .run();
+  }
+
+  private parsePilotRow(r: typeof pilotProjects.$inferSelect): Record<string, unknown> {
+    return {
+      id: r.id,
+      name: r.name,
+      description: r.description,
+      status: r.status,
+      input_spec: r.inputSpec,
+      output_spec: r.outputSpec,
+      phases: JSON.parse(r.phasesJson ?? '[]'),
+      assigned_agents: JSON.parse(r.assignedAgents ?? '[]'),
+      created_by: r.createdBy,
+      created_at: r.createdAt instanceof Date ? r.createdAt.toISOString() : r.createdAt,
+      updated_at: r.updatedAt instanceof Date ? r.updatedAt.toISOString() : r.updatedAt,
+      started_at: r.startedAt instanceof Date ? r.startedAt.toISOString() : r.startedAt,
+      completed_at: r.completedAt instanceof Date ? r.completedAt.toISOString() : r.completedAt,
+    };
+  }
+
+  // ─── SoTADiff conflict detection ──────────────────────
+
+  checkSoTADiffConflicts(params: {
+    agentId: string;
+    filePaths: string[];
+    sinceMs: number;
+  }): Array<Record<string, unknown>> {
+    const since = new Date(Date.now() - params.sinceMs);
+    const rows = this.db
+      .select()
+      .from(sotadiffEntries)
+      .where(
+        and(
+          gt(sotadiffEntries.createdAt, since),
+          ne(sotadiffEntries.agentId, params.agentId),
+        ),
+      )
+      .all();
+
+    const conflicts: Array<Record<string, unknown>> = [];
+    for (const r of rows) {
+      const rFiles = JSON.parse(r.filesJson ?? '[]') as Array<{ path: string }>;
+      const overlap = rFiles.filter(f => params.filePaths.some(p => f.path.includes(p) || p.includes(f.path)));
+      if (overlap.length > 0) {
+        conflicts.push({
+          agent_id: r.agentId,
+          git_commit: r.gitCommit,
+          intent: r.intent,
+          overlapping_files: overlap.map(f => f.path),
+          created_at: new Date(r.createdAt).toISOString(),
+        });
+      }
+    }
+
+    return conflicts;
+  }
+
   // ─── Sliding Window GC (24h) ─────────────────────────────────────
 
   /**
@@ -541,6 +748,7 @@ export class HubStore {
    *  - audit_log (by created_at)
    *  - idempotency_keys (by expires_at)
    *  - path_leases (by expires_at)
+   *  - sotadiff_entries (by created_at)
    *
    * Returns per-table deletion counts for logging.
    */
@@ -636,7 +844,22 @@ export class HubStore {
       .run();
     if (leaseResult.changes > 0) stats.path_leases = leaseResult.changes;
 
-    // 8. Orphaned event cursors: agents that no longer exist in sessions
+    // 8. SoTADiff entries: older than window
+    const sotaResult = this.db
+      .delete(sotadiffEntries)
+      .where(lte(sotadiffEntries.createdAt, cutoff))
+      .run();
+    if (sotaResult.changes > 0) stats.sotadiff = sotaResult.changes;
+
+    // 9. P22 alerts: acknowledged alerts older than 7 days
+    const p22Cutoff = new Date(Date.now() - 7 * 86_400_000);
+    const p22Result = this.db
+      .delete(p22Alerts)
+      .where(and(eq(p22Alerts.acknowledged, true), lte(p22Alerts.createdAt, p22Cutoff)))
+      .run();
+    if (p22Result.changes > 0) stats.p22_alerts = p22Result.changes;
+
+    // 10. Orphaned event cursors: agents that no longer exist in sessions
     const allCursors = this.db.select({ agentId: eventCursors.agentId }).from(eventCursors).all();
     const liveAgentIds = new Set(
       this.db.select({ agentId: sessions.agentId }).from(sessions).all().map((s) => s.agentId),

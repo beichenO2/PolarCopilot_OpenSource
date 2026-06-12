@@ -1,8 +1,7 @@
 {
-  "name": "polarcopilot-hub",
-  "version": "1.0.0",
-  "description": "PolarCopilot Hub — standalone agent prompt server",
-  "private": false,
+  "name": "polarcop-hub",
+  "version": "0.5.1",
+  "private": true,
   "type": "module",
   "engines": {
     "node": ">=22"
@@ -12,14 +11,22 @@
     "start": "tsx src/server.ts",
     "build": "tsc -p tsconfig.json",
     "test": "vitest run",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "ssot:audit": "node scripts/ssot-audit.mjs",
+    "ssot:audit:strict": "node scripts/ssot-audit.mjs --strict",
+    "sync-skills": "bash scripts/sync-skills.sh",
+    "verify-skills": "bash scripts/sync-skills.sh --verify",
+    "sync-handoff": "bash scripts/sync-handoff-rule.sh",
+    "verify-handoff": "bash scripts/sync-handoff-rule.sh --verify"
   },
   "dependencies": {
     "@cfworker/json-schema": "^4.1.1",
     "@modelcontextprotocol/sdk": "1.29.0",
+    "@types/multer": "^2.1.0",
     "better-sqlite3": "12.8.0",
     "drizzle-orm": "0.45.2",
     "express": "^5.2.1",
+    "multer": "^2.1.1",
     "nanoid": "5.1.7",
     "pino": "10.3.1",
     "pino-pretty": "^13.1.3",

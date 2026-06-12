@@ -7,7 +7,7 @@ import type { AlignmentDoc } from '../lib/api'
 import type { Agent, Prompt } from '../types/hub'
 import { optionLabel } from '../types/hub'
 import { ResizableSplitPane } from '../components/ResizableSplitPane'
-import { HistoryPanel } from '../components/HistoryPanel'
+import { SSOTSidebar } from '../components/SSOTSidebar'
 
 const YOLO_MARKERS = ['YOLO 方案', 'YOLO方案', 'YOLO 对齐方案', '确认，开始 YOLO', 'yolo_plan', 'YOLO 进度', 'YOLO 执行完成']
 
@@ -154,6 +154,10 @@ export function YoloPage() {
   const [sending, setSending] = useState(false)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
 
+  // SSoT sidebar state
+  const [ssotCollapsed, setSsotCollapsed] = useState(false)
+  const [ssotHighlight, setSsotHighlight] = useState<{ project: string; reqId: string; feature?: string } | null>(null)
+
   // Error feedback state
   const [approveError, setApproveError] = useState<{ docId: string; message: string } | null>(null)
 
@@ -188,6 +192,24 @@ export function YoloPage() {
     setAnnotationNote('')
     window.getSelection()?.removeAllRanges()
   }, [annotating, annotationNote])
+
+  const handleSsotInsertRef = useCallback((refText: string) => {
+    if (editingDocId && editorRef.current) {
+      const el = editorRef.current
+      const pos = el.selectionStart ?? el.value.length
+      const before = el.value.slice(0, pos)
+      const after = el.value.slice(pos)
+      const insertion = `\n\n> ${refText}\n\n`
+      setEditBuffer(before + insertion + after)
+      setTimeout(() => {
+        el.focus()
+        const newPos = pos + insertion.length
+        el.setSelectionRange(newPos, newPos)
+      }, 50)
+    } else if (yoloInput !== undefined) {
+      setYoloInput(prev => prev ? `${prev}\n\n> ${refText}` : `> ${refText}`)
+    }
+  }, [editingDocId, yoloInput])
 
   const sendDocAnnotations = useCallback(async (docId: string, agentId: string) => {
     const anns = docAnnotations[docId]
@@ -506,12 +528,13 @@ export function YoloPage() {
               onDragOver={(e) => { e.preventDefault(); e.dataTransfer.dropEffect = 'copy' }}
               onDrop={(e) => {
                 e.preventDefault()
-                const text = e.dataTransfer.getData('text/plain')?.trim()
-                if (!text) return
-                const pos = e.currentTarget.selectionStart ?? editBuffer.length
-                const before = editBuffer.slice(0, pos)
-                const after = editBuffer.slice(pos)
-                setEditBuffer(`${before}\n\n> ${text}\n\n${after}`)
+                const text = e.dataTransfer.getData('text/plain')
+                if (text && text.startsWith('[SSoT:')) {
+                  const pos = e.currentTarget.selectionStart ?? editBuffer.length
+                  const before = editBuffer.slice(0, pos)
+                  const after = editBuffer.slice(pos)
+                  setEditBuffer(`${before}\n\n> ${text}\n\n${after}`)
+                }
               }}
               className="w-full bg-hub-bg border border-hub-border rounded-lg px-4 py-3 text-sm text-hub-text font-mono leading-relaxed resize-y min-h-[600px] focus:outline-none focus:border-hub-orange transition-[border-color]"
               style={{ tabSize: 2 }}
@@ -565,6 +588,18 @@ export function YoloPage() {
             </div>
             <div
               onMouseUp={() => handleDocTextSelect(doc.id, document.getElementById(`doc-content-${doc.id}`) as HTMLDivElement)}
+              onClick={(e) => {
+                const target = (e.target as HTMLElement).closest('.ssot-ref') as HTMLElement | null
+                if (!target) return
+                e.preventDefault()
+                const project = target.dataset.ssotProject
+                const reqId = target.dataset.ssotReq
+                const feature = target.dataset.ssotFeature || undefined
+                if (project) {
+                  if (ssotCollapsed) setSsotCollapsed(false)
+                  setSsotHighlight({ project, reqId: reqId ?? '', feature })
+                }
+              }}
               id={`doc-content-${doc.id}`}
               className="px-5 py-4 text-sm leading-relaxed markdown-body [&_h1]:text-hub-orange [&_h2]:text-hub-orange [&_h3]:text-hub-orange [&_code]:text-hub-orange [&_th]:text-hub-orange"
               dangerouslySetInnerHTML={{ __html: renderMarkdown(doc.plan_markdown ?? '') }}
@@ -696,6 +731,18 @@ export function YoloPage() {
           <span className="ml-auto text-xs text-hub-text-muted">{time}</span>
         </div>
         <div
+          onClick={(e) => {
+            const target = (e.target as HTMLElement).closest('.ssot-ref') as HTMLElement | null
+            if (!target) return
+            e.preventDefault()
+            const project = target.dataset.ssotProject
+            const reqId = target.dataset.ssotReq
+            const feature = target.dataset.ssotFeature || undefined
+            if (project) {
+              if (ssotCollapsed) setSsotCollapsed(false)
+              setSsotHighlight({ project, reqId: reqId ?? '', feature })
+            }
+          }}
           className="px-5 py-4 text-sm leading-relaxed markdown-body [&_h1]:text-hub-orange [&_h2]:text-hub-orange [&_h3]:text-hub-orange [&_code]:text-hub-orange [&_th]:text-hub-orange"
           dangerouslySetInnerHTML={{ __html: renderMarkdown(p.prompt ?? '') }}
         />
@@ -777,7 +824,14 @@ export function YoloPage() {
               }
             }}
             onDragOver={(e) => { e.preventDefault(); e.dataTransfer.dropEffect = 'copy' }}
-            placeholder="描述你的极限目标…（⌘+Enter 发送）"
+            onDrop={(e) => {
+              e.preventDefault()
+              const text = e.dataTransfer.getData('text/plain')
+              if (text && text.startsWith('[SSoT:')) {
+                setYoloInput(prev => prev ? `${prev}\n\n> ${text}` : `> ${text}`)
+              }
+            }}
+            placeholder="描述你的极限目标... 从左侧 SSoT 拖拽需求引用 (⌘+Enter 发送)"
             rows={2}
             className="w-full bg-hub-bg border border-hub-border rounded-lg px-4 py-3 text-sm text-hub-text placeholder:text-hub-text-muted resize-y min-h-[60px] focus:outline-none focus:border-hub-orange transition-[border-color]"
           />
@@ -823,37 +877,53 @@ export function YoloPage() {
         </div>
       </section>
 
-    </div>
-  )
+      {/* History section */}
+      <section className="mt-6">
+        <div className="flex items-center gap-3 mb-3 pb-2 border-b border-hub-border">
+          <h2 className="text-base font-semibold flex items-center gap-2">
+            History
+            <span className="text-[0.7rem] px-2 py-0.5 rounded-lg bg-hub-border text-hub-text-muted">
+              {historyCount}
+            </span>
+          </h2>
+          {historyCount > 0 && (
+            <button
+              onClick={() => setShowHistory(!showHistory)}
+              className="ml-auto flex items-center gap-1.5 px-3 py-1 rounded-md border border-hub-border text-hub-text-muted text-xs hover:border-hub-accent hover:text-hub-text transition-colors select-none"
+            >
+              <span className={`inline-block transition-transform ${showHistory ? 'rotate-180' : ''}`}>▼</span>
+              {showHistory ? ' Hide' : ' Show'}
+            </button>
+          )}
+        </div>
 
-  const yoloHistory = (
-    <HistoryPanel
-      count={historyCount}
-      show={showHistory}
-      onToggleShow={() => setShowHistory(!showHistory)}
-      storageKey="pc-yolo-history-ratio"
-      emptyText="尚无 YOLO 历史记录"
-    >
-      {completedDocs.map((doc) => (
-        <YoloHistoryCard key={`doc-${doc.id}`} type="doc" doc={doc} />
-      ))}
-      {history.map((p) => (
-        <YoloHistoryCard key={`prompt-${p.id}`} type="prompt" prompt={p} />
-      ))}
-    </HistoryPanel>
+        {showHistory && (
+          <div className="space-y-2.5">
+            {completedDocs.map((doc) => (
+              <YoloHistoryCard key={`doc-${doc.id}`} type="doc" doc={doc} />
+            ))}
+            {history.map((p) => (
+              <YoloHistoryCard key={`prompt-${p.id}`} type="prompt" prompt={p} />
+            ))}
+            {historyCount === 0 && (
+              <p className="text-sm text-hub-text-muted italic text-center py-4">No history yet</p>
+            )}
+          </div>
+        )}
+      </section>
+    </div>
   )
 
   return (
     <div className="-mx-6 -mt-2 h-[calc(100vh-80px)]">
       <ResizableSplitPane
-        left={yoloContent}
-        right={yoloHistory}
-        defaultRatio={0.68}
-        minLeftPx={400}
-        minRightPx={220}
-        storageKey="pc-yolo-history-ratio"
-        paneLabel="YOLO History"
-        className="h-full"
+        left={<SSOTSidebar onInsertRef={handleSsotInsertRef} highlightReq={ssotHighlight} />}
+        right={yoloContent}
+        defaultRatio={0.35}
+        minLeftPx={220}
+        minRightPx={400}
+        collapsed={ssotCollapsed}
+        onCollapsedChange={setSsotCollapsed}
       />
     </div>
   )

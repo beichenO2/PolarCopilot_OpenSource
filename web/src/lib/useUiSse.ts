@@ -1,26 +1,40 @@
-import { useEffect } from 'react'
+import { useEffect, useRef } from 'react'
 
-export type UiSseHandler = (event: string, data: Record<string, unknown>) => void
+type UiSseEvent = {
+  type: string
+  data: Record<string, unknown>
+}
 
-export function useUiSse(onEvent: UiSseHandler): void {
+export function useUiSse(onEvent: (event: UiSseEvent) => void): void {
+  const cbRef = useRef(onEvent)
+  cbRef.current = onEvent
+
   useEffect(() => {
-    const es = new EventSource('/api/ui/stream')
+    const base = (import.meta as unknown as Record<string, Record<string, string>>).env?.VITE_HUB_URL ?? ''
+    const es = new EventSource(`${base}/api/ui/stream`)
 
-    const wrap = (type: string) => (e: MessageEvent) => {
+    const handler = (ev: MessageEvent) => {
       try {
-        const data = JSON.parse(e.data) as Record<string, unknown>
-        onEvent(type, data)
-      } catch { /* ignore */ }
+        const data = JSON.parse(ev.data)
+        cbRef.current({ type: ev.type, data })
+      } catch { /* ignore malformed events */ }
     }
-
-    es.addEventListener('prompt_created', wrap('prompt_created'))
-    es.addEventListener('prompt_answered', wrap('prompt_answered'))
-    es.addEventListener('alignment_updated', wrap('alignment_updated'))
 
     es.onerror = () => {
       console.warn('[useUiSse] connection lost, browser will auto-reconnect')
     }
 
-    return () => es.close()
-  }, [onEvent])
+    const events = [
+      'prompt_created', 'prompt_answered',
+      'alignment_created', 'alignment_updated',
+      'ssot_updated',
+      'prolusion_created', 'prolusion_updated', 'prolusion_dispatched', 'prolusion_deleted',
+    ] as const
+    for (const evt of events) es.addEventListener(evt, handler)
+
+    return () => {
+      for (const evt of events) es.removeEventListener(evt, handler)
+      es.close()
+    }
+  }, [])
 }

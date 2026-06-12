@@ -1,0 +1,1 @@
+{"source": "~/Polarisor/.planning/REQUIREMENTS.md", "title": "Polarisor 工作区优化", "items": [{"id": "R1", "text": "清理六处 gsd-2.bak-20260414 备份目录"}, {"id": "R2", "text": "修复端口冲突与 service registry"}, {"id": "R3", "text": "修复断裂的通信 (bridge/tools/cli/handoff)"}, {"id": "R4", "text": "消除硬编码路径"}, {"id": "R5", "text": "Vault 去重 / PolarisLab"}, {"id": "R6", "text": "统一 digist 引用协议"}]}

@@ -1,6 +1,8 @@
 import Database from 'better-sqlite3';
 import { type BetterSQLite3Database, drizzle } from 'drizzle-orm/better-sqlite3';
 import { integer, primaryKey, sqliteTable, text } from 'drizzle-orm/sqlite-core';
+import { evolutionSignals, evolutionGenes, evolutionSuggestions, evolutionEvents, EVOLUTION_DDL } from '../evolution/schema.js';
+
 export const sessions = sqliteTable('sessions', {
   mcpSessionId: text('mcp_session_id').primaryKey(),
   agentId: text('agent_id').notNull().unique(),
@@ -201,6 +203,61 @@ export const clkState = sqliteTable('clk_state', {
   tickIntervalMs: integer('tick_interval_ms').notNull().default(30000),
 });
 
+export const sotadiffEntries = sqliteTable('sotadiff_entries', {
+  id: text('id').primaryKey(),
+  agentId: text('agent_id').notNull(),
+  gitCommit: text('git_commit'),
+  intent: text('intent').notNull(),
+  filesJson: text('files_json').notNull(),
+  summary: text('summary').notNull(),
+  createdAt: integer('created_at', { mode: 'timestamp_ms' }).notNull(),
+});
+
+export const pilotProjects = sqliteTable('pilot_projects', {
+  id: text('id').primaryKey(),
+  name: text('name').notNull(),
+  description: text('description').notNull().default(''),
+  status: text('status').notNull().default('draft'),
+  inputSpec: text('input_spec').notNull().default(''),
+  outputSpec: text('output_spec').notNull().default(''),
+  phasesJson: text('phases_json').notNull().default('[]'),
+  assignedAgents: text('assigned_agents').notNull().default('[]'),
+  createdBy: text('created_by'),
+  createdAt: integer('created_at', { mode: 'timestamp_ms' }).notNull(),
+  updatedAt: integer('updated_at', { mode: 'timestamp_ms' }).notNull(),
+  startedAt: integer('started_at', { mode: 'timestamp_ms' }),
+  completedAt: integer('completed_at', { mode: 'timestamp_ms' }),
+});
+
+export const p22Alerts = sqliteTable('p22_alerts', {
+  id: text('id').primaryKey(),
+  agentId: text('agent_id').notNull(),
+  gitCommit: text('git_commit'),
+  alertType: text('alert_type').notNull(),
+  filePath: text('file_path').notNull(),
+  otherAgentId: text('other_agent_id'),
+  details: text('details').notNull(),
+  acknowledged: integer('acknowledged', { mode: 'boolean' }).notNull().default(false),
+  createdAt: integer('created_at', { mode: 'timestamp_ms' }).notNull(),
+});
+
+export const prolusionPlans = sqliteTable('prolusion_plans', {
+  id: text('id').primaryKey(),
+  title: text('title').notNull(),
+  goal: text('goal').notNull(),
+  status: text('status').notNull().default('stage_1'),
+  currentStage: integer('current_stage').notNull().default(1),
+  demandAnalysis: text('demand_analysis').notNull().default('{}'),
+  codeMapping: text('code_mapping').notNull().default('{}'),
+  techOverview: text('tech_overview').notNull().default('{}'),
+  taskAllocation: text('task_allocation').notNull().default('[]'),
+  ssotRefs: text('ssot_refs').notNull().default('[]'),
+  createdBy: text('created_by'),
+  createdAt: integer('created_at', { mode: 'timestamp_ms' }).notNull(),
+  updatedAt: integer('updated_at', { mode: 'timestamp_ms' }).notNull(),
+  completedAt: integer('completed_at', { mode: 'timestamp_ms' }),
+});
+
 export const projectOwnership = sqliteTable('project_ownership', {
   projectName: text('project_name').primaryKey(),
   agentId: text('agent_id').notNull(),
@@ -218,6 +275,7 @@ export const alignmentDocs = sqliteTable('alignment_docs', {
   planMarkdown: text('plan_markdown').notNull().default(''),
   sectionsJson: text('sections_json').notNull().default('[]'),
   version: integer('version').notNull().default(1),
+  pilotProjectId: text('pilot_project_id'),
   createdAt: integer('created_at', { mode: 'timestamp_ms' }).notNull(),
   updatedAt: integer('updated_at', { mode: 'timestamp_ms' }).notNull(),
   approvedAt: integer('approved_at', { mode: 'timestamp_ms' }),
@@ -254,9 +312,17 @@ const hubSchema = {
   questions,
   questionDependencies,
   uiPrompts,
+  sotadiffEntries,
+  pilotProjects,
+  p22Alerts,
+  prolusionPlans,
   projectOwnership,
   alignmentDocs,
   alignmentVersions,
+  evolutionSignals,
+  evolutionGenes,
+  evolutionSuggestions,
+  evolutionEvents,
 };
 
 export type HubDb = BetterSQLite3Database<typeof hubSchema>;
@@ -443,6 +509,33 @@ export function createHubDatabase(dbPath: string): { sqlite: HubSqlite; db: HubD
     CREATE INDEX IF NOT EXISTS idx_ui_prompts_pending ON ui_prompts (answered_at) WHERE answered_at IS NULL;
     CREATE INDEX IF NOT EXISTS idx_events_topic_seq ON events (topic, sequence_number);
     CREATE INDEX IF NOT EXISTS idx_ui_prompts_agent_pending ON ui_prompts (agent_id) WHERE answered_at IS NULL;
+    CREATE TABLE IF NOT EXISTS sotadiff_entries (
+      id text PRIMARY KEY NOT NULL,
+      agent_id text NOT NULL,
+      git_commit text,
+      intent text NOT NULL,
+      files_json text NOT NULL,
+      summary text NOT NULL,
+      created_at integer NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_sotadiff_created ON sotadiff_entries (created_at);
+    CREATE INDEX IF NOT EXISTS idx_sotadiff_agent ON sotadiff_entries (agent_id, created_at);
+    CREATE TABLE IF NOT EXISTS pilot_projects (
+      id text PRIMARY KEY NOT NULL,
+      name text NOT NULL,
+      description text NOT NULL DEFAULT '',
+      status text NOT NULL DEFAULT 'draft',
+      input_spec text NOT NULL DEFAULT '',
+      output_spec text NOT NULL DEFAULT '',
+      phases_json text NOT NULL DEFAULT '[]',
+      assigned_agents text NOT NULL DEFAULT '[]',
+      created_by text,
+      created_at integer NOT NULL,
+      updated_at integer NOT NULL,
+      started_at integer,
+      completed_at integer
+    );
+    CREATE INDEX IF NOT EXISTS idx_pilot_status ON pilot_projects (status);
     CREATE TABLE IF NOT EXISTS alignment_docs (
       id text PRIMARY KEY NOT NULL,
       agent_id text NOT NULL,
@@ -453,6 +546,7 @@ export function createHubDatabase(dbPath: string): { sqlite: HubSqlite; db: HubD
       plan_markdown text NOT NULL DEFAULT '',
       sections_json text NOT NULL DEFAULT '[]',
       version integer NOT NULL DEFAULT 1,
+      pilot_project_id text,
       created_at integer NOT NULL,
       updated_at integer NOT NULL,
       approved_at integer,
@@ -470,6 +564,35 @@ export function createHubDatabase(dbPath: string): { sqlite: HubSqlite; db: HubD
       created_at integer NOT NULL
     );
     CREATE INDEX IF NOT EXISTS idx_alignment_versions_doc ON alignment_versions (alignment_id, version);
+    CREATE TABLE IF NOT EXISTS p22_alerts (
+      id text PRIMARY KEY NOT NULL,
+      agent_id text NOT NULL,
+      git_commit text,
+      alert_type text NOT NULL,
+      file_path text NOT NULL,
+      other_agent_id text,
+      details text NOT NULL,
+      acknowledged integer NOT NULL DEFAULT 0,
+      created_at integer NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_p22_alerts_agent ON p22_alerts (agent_id, acknowledged);
+    CREATE TABLE IF NOT EXISTS prolusion_plans (
+      id text PRIMARY KEY NOT NULL,
+      title text NOT NULL,
+      goal text NOT NULL,
+      status text NOT NULL DEFAULT 'stage_1',
+      current_stage integer NOT NULL DEFAULT 1,
+      demand_analysis text NOT NULL DEFAULT '{}',
+      code_mapping text NOT NULL DEFAULT '{}',
+      tech_overview text NOT NULL DEFAULT '{}',
+      task_allocation text NOT NULL DEFAULT '[]',
+      ssot_refs text NOT NULL DEFAULT '[]',
+      created_by text,
+      created_at integer NOT NULL,
+      updated_at integer NOT NULL,
+      completed_at integer
+    );
+    CREATE INDEX IF NOT EXISTS idx_prolusion_status ON prolusion_plans (status);
     CREATE TABLE IF NOT EXISTS project_ownership (
       project_name text PRIMARY KEY NOT NULL,
       agent_id text NOT NULL,
@@ -478,6 +601,22 @@ export function createHubDatabase(dbPath: string): { sqlite: HubSqlite; db: HubD
     );
     CREATE INDEX IF NOT EXISTS idx_project_ownership_agent ON project_ownership (agent_id);
   `);
+
+  sqlite.exec(`
+    CREATE TABLE IF NOT EXISTS ssot_annotations (
+      id text PRIMARY KEY NOT NULL,
+      project text NOT NULL,
+      field_path text NOT NULL,
+      author text NOT NULL,
+      author_type text NOT NULL DEFAULT 'user',
+      text text NOT NULL,
+      parent_id text,
+      created_at integer NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_ssot_ann_project ON ssot_annotations (project);
+  `);
+
+  sqlite.exec(EVOLUTION_DDL);
 
   // migrations for new columns
   const addColIfMissing = (table: string, col: string, type: string) => {

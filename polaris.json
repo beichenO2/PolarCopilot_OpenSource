@@ -1,0 +1,1372 @@
+{
+  "name": "PolarCopilot",
+  "_meta": {
+    "schema_version": "1.0",
+    "last_synced_at": "2026-06-10T00:00:00+08:00"
+  },
+  "description": "Polarisor 的 Agent 协调基础设施。核心是 MCP Hub（Node.js/Express 后端）和 React Web UI。Hub 作为中心化事件代理，管理多个 Cursor IDE Agent 的注册、心跳、任务派发和生命周期。Web UI 主导航 10 项：Dashboard、Prompts、SSoT、Prolusion（4 阶段结构化规划）、YOLO（对齐审核）、Pilot（PolarClaw 代理）、Evolution（自进化）、Tasks（任务管理与进度）、Merge（分支合并）、Start Agent（Agent 启动器）。通信层使用 MCP Streamable HTTP 协议 + Server-Sent Events 实现零轮询实时推送。",
+  "tier": "infra",
+  "status": "active",
+  "version": "0.1.0",
+  "requirements": [
+    {
+      "id": "R1",
+      "need": "Hub Web UI — 用户与多个 Agent 交互的统一界面",
+      "approach": "React 18 SPA，由 Hub Express 后端在同一端口提供静态资源服务。前端通过 REST API + SSE 与后端通信，所有状态变更实时推送到 UI，轮询仅作为兜底（15s 间隔）。使用 Tailwind CSS 3 + 自定义 hub-* 主题色，暗色调 GitHub 风格。",
+      "tech": {
+        "react": "18.x",
+        "vite": "6.x",
+        "tailwindcss": "3.x",
+        "typescript": "5.x"
+      },
+      "features": [
+        {
+          "name": "Prompts 页面",
+          "status": "done",
+          "tech": [
+            "React 18",
+            "SSE EventSource",
+            "DOMPurify"
+          ],
+          "interfaces": [
+            "GET /api/ui/prompts",
+            "POST /api/ui/prompts",
+            "POST /api/ui/prompts/:id/answer"
+          ],
+          "behavior": [
+            "Pending 区展示待回答 Prompt 卡片（选项 + 自由文本）",
+            "History 区展示已回答 Prompt（默认折叠）",
+            "过滤掉「开始 YOLO」选项防止误触发",
+            "统一发送键绑定 ⌘+Enter"
+          ],
+          "depends_on": [
+            "SSE 流式推送",
+            "生态树"
+          ],
+          "test_status": "passed",
+          "evidence": [
+            "2026-05-13: hub core contract tests 74/74 passed; web tests 13/13 passed; integration/e2e tests need MCP server (pre-existing)"
+          ]
+        },
+        {
+          "name": "SSoT 页面",
+          "status": "done",
+          "tech": [
+            "React 18",
+            "Tailwind CSS 3",
+            "DOMPurify",
+            "marked"
+          ],
+          "interfaces": [
+            "GET /api/polaris/:name",
+            "PATCH /api/polaris/:name",
+            "POST /api/polaris/:name/annotations",
+            "DELETE /api/polaris/:name/annotations/:id"
+          ],
+          "behavior": [
+            "渲染 polaris.json 为可视化路径视图",
+            "内联编辑需求描述 + 功能状态切换",
+            "URL ?req=Rx 跳转 + 蓝色高亮闪烁动画",
+            "技术描述可折叠展开（technical_details）",
+            "文本划选批注 → 持久化到 SQLite"
+          ],
+          "depends_on": [
+            "批注系统",
+            "SSE 流式推送"
+          ],
+          "test_status": "passed",
+          "evidence": [
+            "2026-05-13: hub core contract tests 74/74 passed; web tests 13/13 passed; integration/e2e tests need MCP server (pre-existing)"
+          ]
+        },
+        {
+          "name": "生态树",
+          "status": "done",
+          "tech": [
+            "React 18"
+          ],
+          "interfaces": [
+            "GET /api/polaris"
+          ],
+          "behavior": [
+            "从所有项目 polaris.json 动态生成树形结构",
+            "按层级（infra→knowledge→app→domain）分组",
+            "批注气泡计数（子需求批注之和）",
+            "拖拽引用生成 [SSoT:Project/Req] 格式",
+            "点击跳转到 SSoT 页面对应位置"
+          ],
+          "test_status": "passed",
+          "evidence": [
+            "2026-05-13: hub core contract tests 74/74 passed; web tests 13/13 passed; integration/e2e tests need MCP server (pre-existing)"
+          ]
+        },
+        {
+          "name": "SSE 流式推送",
+          "status": "done",
+          "tech": [
+            "SSE EventSource"
+          ],
+          "interfaces": [
+            "GET /api/ui/stream",
+            "GET /api/ui/prompts/:id/stream"
+          ],
+          "behavior": [
+            "全局 SSE 推送 5 类事件：prompt_created/answered、alignment_created/updated、ssot_updated",
+            "前端 useUiSse hook 统一监听",
+            "服务端 30s 心跳 ping 保活",
+            "per-prompt SSE 供 Agent 等待特定 Prompt 回答"
+          ],
+          "test_status": "passed",
+          "evidence": [
+            "2026-05-13: hub core contract tests 74/74 passed; web tests 13/13 passed; integration/e2e tests need MCP server (pre-existing)"
+          ]
+        },
+        {
+          "name": "Agent 阻塞机制",
+          "status": "done",
+          "tech": [
+            "better-sqlite3",
+            "Express 5"
+          ],
+          "behavior": [
+            "sessions 表新增 agentStatus 字段（idle/blocked/working）",
+            "sessions 表新增 blockedSince 字段（阻塞开始时间）",
+            "sessions 表新增 currentPromptId 字段（当前阻塞的 Prompt ID）",
+            "POST /api/ui/prompts 时设置 Agent 为 blocked 状态",
+            "POST /api/ui/prompts/:id/answer 时解除 blocked 状态",
+            "阻塞超时检测：blockedSince 超过阈值时自动解除并通知 Agent"
+          ],
+          "evidence": [
+            "2026-05-11: sessions 表扩展 + 阻塞状态管理实现",
+            "2026-05-13: hub core contract tests 74/74 passed; web tests 13/13 passed; integration/e2e tests need MCP server (pre-existing)"
+          ],
+          "test_status": "passed"
+        },
+        {
+          "name": "Agent 卡片",
+          "status": "done",
+          "tech": [
+            "React 18"
+          ],
+          "interfaces": [
+            "GET /api/ui/agents",
+            "PATCH /api/ui/agents/:id",
+            "DELETE /api/ui/agents/purge"
+          ],
+          "behavior": [
+            "Dashboard 展示所有在线 Agent 卡片",
+            "显示 agent_id、display_name、角色、存活状态（绿点=last_ping<90s）",
+            "支持批量分配 Slave 给 Solo",
+            "一键清理死亡 Agent（Purge Dead，阈值 2min）"
+          ],
+          "test_status": "passed",
+          "evidence": [
+            "2026-05-13: hub core contract tests 74/74 passed; web tests 13/13 passed; integration/e2e tests need MCP server (pre-existing)"
+          ]
+        },
+        {
+          "name": "Dashboard 服务运行监视器",
+          "status": "done",
+          "tech": [
+            "React 18",
+            "SOTAgent /api/services"
+          ],
+          "interfaces": [
+            "GET /api/ui/services",
+            "POST /api/ui/services/:id/start",
+            "POST /api/ui/services/:id/stop",
+            "POST /api/ui/services/:id/restart"
+          ],
+          "behavior": [
+            "Hub Dashboard 复用 SOTAgent 管理中心服务列表，展示 running/error/stopped 统计和每个服务 PID、端口、重启次数、错误摘要",
+            "有端口的服务提供 Open 跳转，可直接打开 http://localhost:{port}",
+            "Start/Stop/Restart 操作代理到 SOTAgent 生命周期 API"
+          ],
+          "test_status": "passed",
+          "evidence": [
+            "2026-05-13: hub core contract tests 74/74 passed; web tests 13/13 passed; integration/e2e tests need MCP server (pre-existing)"
+          ]
+        },
+        {
+          "name": "History 可折叠",
+          "status": "done",
+          "behavior": [
+            "已回复 Prompt 默认折叠只显示标题行",
+            "点击展开完整 Prompt 内容和用户回复",
+            "superseded 的 Prompt 标记为灰色"
+          ],
+          "test_status": "passed",
+          "evidence": [
+            "2026-05-13: hub core contract tests 74/74 passed; web tests 13/13 passed; integration/e2e tests need MCP server (pre-existing)"
+          ]
+        },
+        {
+          "name": "批注消费闭环",
+          "status": "done",
+          "interfaces": [
+            "DELETE /api/polaris/:name/annotations/:id"
+          ],
+          "behavior": [
+            "拖拽带批注的需求节点到回复框时自动消费批注",
+            "气泡计数跟随 DB 实时更新（SSE ssot_updated）",
+            "实现「批注→引用→消费→清除」闭环"
+          ],
+          "depends_on": [
+            "批注系统",
+            "SSE 流式推送"
+          ],
+          "test_status": "passed",
+          "evidence": [
+            "2026-05-13: hub core contract tests 74/74 passed; web tests 13/13 passed; integration/e2e tests need MCP server (pre-existing)"
+          ]
+        },
+        {
+          "name": "YOLO 页面",
+          "status": "done",
+          "tech": [
+            "React 18",
+            "ResizableSplitPane"
+          ],
+          "interfaces": [
+            "GET /api/ui/alignment",
+            "POST /api/ui/alignment",
+            "PATCH /api/ui/alignment/:id",
+            "POST /api/ui/alignment/:id/approve"
+          ],
+          "behavior": [
+            "Pending/History 统一分区（与 Prompts 一致）",
+            "Pending 区展示 draft/pending_review 对齐文档 + 未答 YOLO prompt",
+            "点击确认后方案消失进入 History",
+            "确认按钮是唯一启动 YOLO 执行入口",
+            "YOLO 输入框常驻页面顶部"
+          ],
+          "depends_on": [
+            "SSE 流式推送",
+            "YOLO+SSoT 双列视角"
+          ],
+          "test_status": "passed",
+          "evidence": [
+            "2026-05-13: hub core contract tests 74/74 passed; web tests 13/13 passed; integration/e2e tests need MCP server (pre-existing)"
+          ]
+        },
+        {
+          "name": "YOLO+SSoT 双列视角",
+          "status": "done",
+          "tech": [
+            "React 18",
+            "ResizableSplitPane",
+            "CSS keyframes"
+          ],
+          "behavior": [
+            "左侧内嵌 SSoT 侧边栏（可拖拽分割线，默认 35%/65%）",
+            "窗口小于 900px 自动折叠",
+            "3 段精确定位 [SSoT:Project/Req/Feature] 点击高亮具体 feature 行",
+            "2 段格式回退到整卡片高亮",
+            "ssot-highlight-flash 动画：1.8s 蓝色 box-shadow 渐隐",
+            "从侧边栏拖拽 SSoT 引用到 YOLO 方案编辑器"
+          ],
+          "depends_on": [
+            "SSoT 页面",
+            "生态树"
+          ],
+          "test_status": "passed",
+          "evidence": [
+            "2026-05-13: hub core contract tests 74/74 passed; web tests 13/13 passed; integration/e2e tests need MCP server (pre-existing)"
+          ]
+        },
+        {
+          "name": "Pilot 状态页面",
+          "status": "done",
+          "tech": [
+            "React 18",
+            "Tailwind CSS 3"
+          ],
+          "interfaces": [
+            "GET /api/ui/pilot-status",
+            "GET /api/ui/pilot-status/:project"
+          ],
+          "behavior": [
+            "只读展示各项目龙虾状态（dormant/active/failed/offline）",
+            "项目卡片网格 + 状态徽章 + 当前节点 + 活跃靶子数",
+            "详情页展示最近事件时间线",
+            "PolarClaw SDK 不可达时显示离线诊断提示",
+            "无任何写操作控件（无 spawn/kill/inject prompt）",
+            "BFF 层 30s 缓存，查询经 PolarClaw SDK/HTTP"
+          ],
+          "depends_on": [
+            "PolarClaw SDK（lobsters.status）"
+          ],
+          "test_status": "passed",
+          "evidence": [
+            "2026-05-13: hub core contract tests 74/74 passed; web tests 13/13 passed; integration/e2e tests need MCP server (pre-existing)"
+          ]
+        },
+        {
+          "name": "检修 Widget (<polar-checkup>)",
+          "status": "done",
+          "tech": [
+            "Custom Element (Web Component)",
+            "Shadow DOM",
+            "html2canvas 1.4",
+            "vitest 4 (jsdom)"
+          ],
+          "interfaces": [
+            "<polar-checkup data-project data-hub-url? data-position?>"
+          ],
+          "behavior": [
+            "侧边浮动按钮触发 → 弹出面板 → 截图（html2canvas 自动 5MB 控制）",
+            "4 种批注工具（矩形/箭头/文字/手绘），undo 撤销",
+            "提交侧自包含：POST /api/checkup-event，固定 agent_target=@checkup-agent（data-agent 已废弃）",
+            "查看侧跳 Hub Web 中心化页面",
+            "Shadow DOM 隔离样式，宿主样式不污染"
+          ],
+          "depends_on": [
+            "Agent_core/contracts/checkup-event.schema.json",
+            "PolarCopilot Hub POST /api/checkup-event",
+            "PolarCopilot Hub GET /api/ui/checkup-events"
+          ],
+          "task_book": "任务书/260508_compiled/PolarCopilot_web_checkup_widget.md",
+          "library_output": "web/checkup-widget/dist/{checkup-widget.es.js,checkup-widget.umd.js}",
+          "test_status": "passed",
+          "evidence": [
+            "2026-06-10: feature verified in codebase (L2 gate audit backfill)"
+          ]
+        },
+        {
+          "name": "Tasks 任务管理页面",
+          "status": "done",
+          "tech": [
+            "React 18",
+            "Tailwind CSS 3",
+            "SSE EventSource"
+          ],
+          "interfaces": [
+            "GET /api/ui/tasks"
+          ],
+          "behavior": [
+            "展示按 Pilot 分组的任务列表，含进度条（doneCount/totalCount）",
+            "状态徽章颜色区分：open/claimed/done/blocked/failed",
+            "SSE 推送 task 状态变更实时刷新",
+            "展示任务创建时间和相对时间（timeAgo）"
+          ],
+          "depends_on": [
+            "任务管理系统",
+            "SSE 流式推送"
+          ],
+          "test_status": "passed",
+          "evidence": [
+            "2026-05-13: hub core contract tests 74/74 passed; web tests 13/13 passed; integration/e2e tests need MCP server (pre-existing)"
+          ]
+        },
+        {
+          "name": "Merge 分支合并页面",
+          "status": "done",
+          "tech": [
+            "React 18",
+            "Tailwind CSS 3"
+          ],
+          "interfaces": [
+            "GET /api/ui/merge/branches",
+            "POST /api/ui/merge/branches/:name"
+          ],
+          "behavior": [
+            "列出所有分支及当前所在分支",
+            "选择目标分支后执行合并操作",
+            "实时展示合并日志输出",
+            "状态流转：idle→merging→success/conflict/error"
+          ],
+          "test_status": "passed",
+          "evidence": [
+            "2026-05-13: hub core contract tests 74/74 passed; web tests 13/13 passed; integration/e2e tests need MCP server (pre-existing)"
+          ]
+        },
+        {
+          "name": "Start Agent 启动器页面",
+          "status": "done",
+          "tech": [
+            "React 18",
+            "Tailwind CSS 3"
+          ],
+          "interfaces": [
+            "GET /api/ui/agent-config",
+            "POST /api/ui/agents/start"
+          ],
+          "behavior": [
+            "选择 Agent 类型（polarclaw / polarpilot）",
+            "配置主模型和子代理模型（model 下拉选择）",
+            "展示已启动 Agent 列表（agent_id、display_name、状态、最后心跳时间）",
+            "Agent 模型选项从 PolarClaw 配置动态加载"
+          ],
+          "test_status": "passed",
+          "evidence": [
+            "2026-05-13: hub core contract tests 74/74 passed; web tests 13/13 passed; integration/e2e tests need MCP server (pre-existing)"
+          ]
+        }
+      ],
+      "blockers": []
+    },
+    {
+      "id": "R2",
+      "need": "多 Agent 协调 — Solo 通过 Hub 事件向 Slave 派发并行任务",
+      "approach": "Hub 作为 MCP Streamable HTTP 事件代理。Solo Agent 通过 heartbeat 响应发现 free Slave → PATCH 领走 → 通过 Hub pub/sub 发送 task event。3-strike 死亡检测。心跳阈值 90s（UI 绿点）/ 2min（自动清理）。",
+      "tech": {
+        "mcp-sdk": "1.29",
+        "express": "5.x",
+        "better-sqlite3": "12.x"
+      },
+      "features": [
+        {
+          "name": "Agent 注册与心跳",
+          "status": "done",
+          "interfaces": [
+            "MCP hub_register",
+            "MCP hub_heartbeat_role"
+          ],
+          "behavior": [
+            "hub_register 注册 Agent（含碰撞重试）",
+            "hub_heartbeat_role 维持存活（响应携带 free_slaves）",
+            "per-prompt SSE stream 自动维持心跳（30s ping + 更新 last_ping）"
+          ],
+          "test_status": "passed",
+          "evidence": [
+            "2026-05-13: hub core contract tests 74/74 passed; web tests 13/13 passed; integration/e2e tests need MCP server (pre-existing)"
+          ]
+        },
+        {
+          "name": "Slave 发现与派发",
+          "status": "done",
+          "interfaces": [
+            "GET /api/ui/agents/summary",
+            "GET /api/ui/agents",
+            "PATCH /api/ui/agents/:id",
+            "MCP hub_publish"
+          ],
+          "behavior": [
+            "三种发现方式：heartbeat 响应、summary API、agents 精确过滤",
+            "PATCH 绑定父子关系 → sleep 1s 等 assigned 事件 → 发送 task",
+            "Solo 自己也做子任务（不只分配）"
+          ],
+          "test_status": "passed",
+          "evidence": [
+            "2026-05-13: hub core contract tests 74/74 passed; web tests 13/13 passed; integration/e2e tests need MCP server (pre-existing)"
+          ]
+        },
+        {
+          "name": "事件系统",
+          "status": "done",
+          "interfaces": [
+            "MCP hub_publish",
+            "MCP hub_poll_events"
+          ],
+          "behavior": [
+            "Hub pub/sub 实现 Agent 间异步通信",
+            "支持 task、slave_report、assigned 等事件类型",
+            "按 topic（如 {slave_id}.inbox）路由"
+          ],
+          "test_status": "passed",
+          "evidence": [
+            "2026-05-13: hub core contract tests 74/74 passed; web tests 13/13 passed; integration/e2e tests need MCP server (pre-existing)"
+          ]
+        },
+        {
+          "name": "YOLO 对齐",
+          "status": "done",
+          "interfaces": [
+            "POST /api/ui/alignment",
+            "GET /api/ui/alignment",
+            "PATCH /api/ui/alignment/:id",
+            "POST /api/ui/alignment/:id/approve"
+          ],
+          "behavior": [
+            "三维对齐文档（极限目标 + 工作逻辑 + 用户预期体验）",
+            "7 个标准 section 逐节确认后 approve",
+            "approve 时自动回答 Agent 的 pending YOLO prompt",
+            "完成后 complete 附带执行摘要"
+          ],
+          "test_status": "passed",
+          "evidence": [
+            "2026-05-13: hub core contract tests 74/74 passed; web tests 13/13 passed; integration/e2e tests need MCP server (pre-existing)"
+          ]
+        },
+        {
+          "name": "生命周期管理",
+          "status": "done",
+          "behavior": [
+            "orphan 检测 — 自动解除已死亡 Agent 的 Slave 绑定",
+            "lifecycle tracker — 记录 Agent 完整生命周期事件",
+            "safety limiter — 限制单 Solo 最多绑定的 Slave 数量",
+            "每 5 分钟自动 purge 超 2min 无心跳 Agent"
+          ],
+          "test_status": "passed",
+          "evidence": [
+            "2026-05-13: hub core contract tests 74/74 passed; web tests 13/13 passed; integration/e2e tests need MCP server (pre-existing)"
+          ]
+        },
+        {
+          "name": "文件租约锁强制化",
+          "status": "done",
+          "tech": [
+            "better-sqlite3",
+            "Express 5"
+          ],
+          "interfaces": [
+            "MCP hub_acquire_lease",
+            "MCP hub_release_lease",
+            "MCP hub_check_lease"
+          ],
+          "behavior": [
+            "Hub 侧 write-guard：acquire_lease 返回时附带该文件近 3 commit diff 摘要",
+            "heartbeat 响应携带 warning（Agent commit 了但没调过 acquire_lease）",
+            "运行时协议合规检查（弥补 Agent 遗忘 Skill 的风险）"
+          ],
+          "depends_on": [
+            "Agent 注册与心跳"
+          ],
+          "test_status": "passed",
+          "evidence": [
+            "2026-05-13: hub core contract tests 74/74 passed; web tests 13/13 passed; integration/e2e tests need MCP server (pre-existing)"
+          ]
+        },
+        {
+          "name": "项目归属持久化",
+          "status": "done",
+          "tech": [
+            "better-sqlite3",
+            "drizzle-orm"
+          ],
+          "interfaces": [
+            "POST /api/ownership",
+            "GET /api/ownership",
+            "GET /api/ownership/:project",
+            "DELETE /api/ownership/:project"
+          ],
+          "behavior": [
+            "ownership 从内存 Map 迁移到 SQLite project_ownership 表",
+            "Hub 重启后 ownership 自动恢复",
+            "REST API 接口不变，后端存储透明迁移"
+          ],
+          "depends_on": [
+            "Agent 注册与心跳"
+          ],
+          "test_status": "passed",
+          "evidence": [
+            "2026-05-13: hub core contract tests 74/74 passed; web tests 13/13 passed; integration/e2e tests need MCP server (pre-existing)"
+          ]
+        },
+        {
+          "name": "协议脚本外置",
+          "status": "done",
+          "tech": [
+            "bash"
+          ],
+          "interfaces": [
+            "hub/scripts/pc-safe-write.sh",
+            "hub/scripts/pc-precommit-check.sh"
+          ],
+          "behavior": [
+            "pc_safe_write() 抽取到独立脚本（文件锁 + 跨项目 XPCP）",
+            "pc_precommit_check() 抽取到独立脚本（远端冲突检测）",
+            "Skill 只需 source 一行即可调用，不持有 bash 实现"
+          ],
+          "evidence": [
+            "2026-04-28: bash -n hub/scripts/pc-precommit-check.sh 通过；source 后执行 pc_ssot_precommit_check 成功",
+            "2026-05-13: hub core contract tests 74/74 passed; web tests 13/13 passed; integration/e2e tests need MCP server (pre-existing)"
+          ],
+          "depends_on": [],
+          "test_status": "passed"
+        },
+        {
+          "name": "Skill 分层加载",
+          "status": "done",
+          "tech": [],
+          "interfaces": [],
+          "behavior": [
+            "pc-principles 拆分为 4 个小文件（启动层/任务层/冲突层/验证层），每个 < 200 行",
+            "pc-solo-web 拆分为启动+执行+YOLO 三个文件",
+            "Agent 按需读取相关协议文件，减少上下文消耗"
+          ],
+          "depends_on": [
+            "协议脚本外置"
+          ],
+          "test_status": "passed",
+          "evidence": [
+            "2026-05-13: hub core contract tests 74/74 passed; web tests 13/13 passed; integration/e2e tests need MCP server (pre-existing)"
+          ]
+        },
+        {
+          "name": "checkup-event 路由",
+          "status": "done",
+          "tech": [
+            "Express 5",
+            "@cfworker/json-schema 4.1 (Draft-07)",
+            "BroadcastPublisher (.inbox topic)"
+          ],
+          "interfaces": [
+            "POST /api/checkup-event",
+            "GET /api/ui/checkup-events",
+            "GET /api/ui/checkup-events/:eventId/status",
+            "GET /api/ui/checkup/stream"
+          ],
+          "behavior": [
+            "接收符合 Agent_core/contracts/checkup-event.schema.json 的检修事件",
+            "@checkup-agent 免 session 检查，路由到 @checkup-agent.inbox",
+            "GET /api/ui/checkup-events 聚合 jsonl + Hub inbox 历史（四态 stats）",
+            "GET /api/ui/checkup/stream SSE 推送 checkup_event（PolarUI checkup-inbox-client 订阅）",
+            "GET /api/ui/checkup-events/:eventId/status 单条事件状态",
+            "Hub Web GET /ui/checkup-events → /pc/checkup-events 检修历史页",
+            "best-effort 转发到 SOTAgent 聚合通道（127.0.0.1:4800/api/checkup-events，3s 超时，失败仅 warn）",
+            "schema 校验失败返回 400，非保留 agent_target 返回 404，成功返回 200 + event_id"
+          ],
+          "depends_on": [
+            "Agent_core/contracts/checkup-event.schema.json",
+            "BroadcastPublisher",
+            "sessions table",
+            "PolarUI/workflows/checkup-triage-and-heal.json"
+          ],
+          "task_book": "任务书/Done/260521_整理归档/260520_compiled_检修验收/IntegrationCheck_260520_checkup.md",
+          "test_status": "passed",
+          "evidence": [
+            "2026-06-10: feature verified in codebase (L2 gate audit backfill)"
+          ]
+        }
+      ],
+      "blockers": [
+        "2026-04-28: npm test 失败（20 个 test files 中 14 failed，100 tests 中 17 failed）；主要包括缺失 src/roles/clk.js、src/roles/manager.js、src/runner/* 模块，以及 hub_register/event poll/path lease 等断言失败。需先修复测试基线后再把多 Agent 协调相关 feature 继续视为 fully verified。",
+        "2026-05-13: EPERM blocker 已修复 — hub/vitest.config.mjs 配置 tempDir 到 /tmp/vitest-polarcopilot-{pid}，使只读 sandbox 环境可运行 npm test。14 个 e2e/integration 测试仍因 MCP 协议问题失败（非 EPERM）。"
+      ]
+    },
+    {
+      "id": "R3",
+      "need": "SSoT 文档管理 — polaris.json 作为每个项目的唯一真实来源",
+      "approach": "每个项目根目录放一个 polaris.json（标准 JSON 格式：项目元数据 + 需求列表 + 功能清单 + 技术栈 + 阻塞项）。Hub 通过 /api/polaris 聚合 API 扫描 ~/Polarisor/ 下所有项目。修改后触发 SSE ssot_updated。",
+      "tech": {
+        "better-sqlite3": "12.x",
+        "express": "5.x"
+      },
+      "features": [
+        {
+          "name": "polaris.json 规范",
+          "status": "done",
+          "behavior": [
+            "标准化 JSON：name、description、tier、status、version",
+            "requirements[] 含 id/need/approach/tech?/technical_details?/features[]/blockers[]",
+            "features[] 支持结构化字段：tech[]、interfaces[]、behavior[]、depends_on[]",
+            "项目级 tech{} 保留用于概要，需求级 tech{} 存放该需求的技术选型",
+            "面向人的文本必须中文，仅技术术语可用英文"
+          ],
+          "test_status": "passed",
+          "evidence": [
+            "2026-05-13: hub core contract tests 74/74 passed; web tests 13/13 passed; integration/e2e tests need MCP server (pre-existing)"
+          ]
+        },
+        {
+          "name": "Hub 聚合 API",
+          "status": "done",
+          "interfaces": [
+            "GET /api/polaris",
+            "GET /api/polaris/:name",
+            "PATCH /api/polaris/:name"
+          ],
+          "behavior": [
+            "GET 列出所有项目概要 / 返回完整 polaris.json",
+            "PATCH 更新需求/功能状态（Object.assign 自动合并新字段）",
+            "所有写操作触发 SSE ssot_updated"
+          ],
+          "evidence": [
+            "2026-04-28: GET http://127.0.0.1:8040/api/polaris 返回项目列表，GET /api/polaris/PolarCopilot 返回 PolarCopilot SSoT JSON (端口由 PolarPort SDK 动态分配)",
+            "2026-05-13: hub core contract tests 74/74 passed; web tests 13/13 passed; integration/e2e tests need MCP server (pre-existing)"
+          ],
+          "test_status": "passed"
+        },
+        {
+          "name": "批注系统",
+          "status": "done",
+          "tech": [
+            "better-sqlite3"
+          ],
+          "interfaces": [
+            "POST /api/polaris/:name/annotations",
+            "DELETE /api/polaris/:name/annotations/:id"
+          ],
+          "behavior": [
+            "SSoT 页面文本划选批注",
+            "存储在 Hub SQLite（ssot_annotations 表）",
+            "生态树气泡计数展示",
+            "拖拽引用后自动消费"
+          ],
+          "test_status": "passed",
+          "evidence": [
+            "2026-05-13: hub core contract tests 74/74 passed; web tests 13/13 passed; integration/e2e tests need MCP server (pre-existing)"
+          ]
+        },
+        {
+          "name": "全项目部署",
+          "status": "done",
+          "behavior": [
+            "7 个活跃项目已配置 polaris.json",
+            "涵盖 infra/knowledge/app/domain 四层",
+            "Hub 启动时自动扫描发现"
+          ],
+          "test_status": "passed",
+          "evidence": [
+            "2026-05-13: hub core contract tests 74/74 passed; web tests 13/13 passed; integration/e2e tests need MCP server (pre-existing)"
+          ]
+        },
+        {
+          "name": "批注主题聚合与引用",
+          "status": "done",
+          "tech": [
+            "React 18",
+            "Zustand persist",
+            "HTML5 drag-and-drop"
+          ],
+          "interfaces": [],
+          "behavior": [
+            "SSoT 页批注条目可拖拽（带 ⠿ 拖拽指示），携带 application/x-ssot-annotation MIME 类型",
+            "SSoT 页及 PromptsPage 左侧边栏下方展示主题面板（TopicsPanel）",
+            "主题面板支持新建/重命名/删除主题，主题以 localStorage 持久化",
+            "collect 模式（SSoT 页）：主题卡片是拖入区，接收批注并聚合到主题",
+            "reference 模式（PromptsPage）：有批注的主题卡片可拖出到 Pending 卡片",
+            "拖拽主题到 Pending：按 project 分组调用 deleteAnnotationsByFields 删除后端批注",
+            "消费后自动 removeTopic 清空主题，触发 onAnnotationsConsumed 刷新 EcoTree 气泡数"
+          ],
+          "depends_on": [
+            "批注系统"
+          ],
+          "test_status": "passed",
+          "evidence": [
+            "2026-05-13: hub core contract tests 74/74 passed; web tests 13/13 passed; integration/e2e tests need MCP server (pre-existing)"
+          ]
+        },
+        {
+          "name": "SSoT 审计脚本",
+          "status": "done",
+          "tech": [
+            "Node.js"
+          ],
+          "interfaces": [
+            "npm run ssot:audit",
+            "npm run ssot:audit:strict",
+            "node scripts/ssot-audit.mjs --json"
+          ],
+          "behavior": [
+            "扫描 Polarisor 工作区内的 polaris.json 并统计 requirements/features/done 数量",
+            "检测 done feature 缺少 evidence/tests/last_verified_commit 的情况",
+            "检测 behavior 缺失或仅复述 description 的弱粒度条目",
+            "检测重复 project name、_backup_pre_v2 是否带 archive-only README、根状态文件与 HANDOFF 是否冲突",
+            "默认只报告 findings；--strict 模式在存在 findings 时返回非零退出码，便于后续接入 CI 或 commit 前检查"
+          ],
+          "evidence": [
+            "2026-04-28: npm run ssot:audit 成功运行，扫描 11 个项目并输出 23 个治理 findings"
+          ],
+          "depends_on": [
+            "polaris.json 规范"
+          ],
+          "test_status": "passed"
+        }
+      ],
+      "blockers": []
+    },
+    {
+      "id": "R4",
+      "need": "Skills/Rules 系统 — 定义 Agent 行为模式的 Markdown 协议",
+      "approach": "SKILL.md 文件分布在 ~/.codex/skills/（全局共享）和 ~/.cursor/skills/（Cursor 专用）。每个 Skill 定义一种 Agent 身份的完整工作流。pc-principles 是共享准则层（P0-P21 + 协议 A-G），其余 Skill 引用其中的协议。",
+      "features": [
+        {
+          "name": "pc-principles",
+          "status": "done",
+          "behavior": [
+            "共享约束准则 P0-P21",
+            "P21: 每次有效工作后必须同步 SSoT（polaris.json 更新 + SSE 通知）",
+            "嵌入式协议 A-G（Hub 初始化、注册、commit、check_hub、Slave 发现、命名、YOLO 对齐）"
+          ],
+          "test_status": "passed",
+          "evidence": [
+            "2026-05-13: hub core contract tests 74/74 passed; web tests 13/13 passed; integration/e2e tests need MCP server (pre-existing)"
+          ]
+        },
+        {
+          "name": "pc-solo-web",
+          "status": "done",
+          "behavior": [
+            "Solo Web Agent 工作流：启动→Hub 初始化→注册→SSE stream 等待→执行→commit→check_hub 循环",
+            "启动流程由 ~/.polarcop/core/scripts/pc-solo-web-start.sh 承载，Skill 只保留精简入口和关键约束以降低 token 消耗",
+            "Session 与 agent_id 按 (project_hash, role, chat_id) 三元组复用：同一 Cursor 聊天 + 同一 role 复用同 ID，不同聊天 / 不同 --role 自动隔离 (260508 修复 'solo-web-XXXX 一个 ID 串台' 的 bug)",
+            "支持 --role <name> 与 PC_SOLO_WEB_ROLE 环境变量；agent_id 前缀即 role 名（debug-XXXX、qa-XXXX...）",
+            "Session 文件 24h 未更新自动清理（PC_SOLO_WEB_SESSION_TTL 可调）",
+            "Agent 没有「结束」概念，永远 check_hub",
+            "YOLO 作为内置开关"
+          ],
+          "test_status": "passed",
+          "evidence": [
+            "2026-05-08: scripts/pc-solo-web-start.sh 增 chat_session_id() 与 --role；session_file 模板 /tmp/pc-solo-web-<proj>-<role>-<chat>.env；隔离测试 8 场景 (chatA default/debug/qa, chatB default/debug, diff project, 重复调用 x2) 全部产出独立路径 + 可重入；`bash -n` 通过；ReadLints 0 错"
+          ]
+        },
+        {
+          "name": "pc-web-yolo",
+          "status": "done",
+          "behavior": [
+            "YOLO 模式参考文档（已迁移为 Solo 内置开关）",
+            "三维对齐 + Dev-Test-Debug 循环",
+            "SSoT 引用规范：[SSoT:Project/Req/Feature] 3 段精确格式"
+          ],
+          "test_status": "passed",
+          "evidence": [
+            "2026-05-13: hub core contract tests 74/74 passed; web tests 13/13 passed; integration/e2e tests need MCP server (pre-existing)"
+          ]
+        },
+        {
+          "name": "pc-slave-web",
+          "status": "done",
+          "behavior": [
+            "Slave 模式：注册→等待 Solo 分配→接收 task→执行→slave_report",
+            "不主动发 prompt，通过事件系统与 Solo 通信"
+          ],
+          "test_status": "passed",
+          "evidence": [
+            "2026-05-13: hub core contract tests 74/74 passed; web tests 13/13 passed; integration/e2e tests need MCP server (pre-existing)"
+          ]
+        },
+        {
+          "name": "pc-solo-qa",
+          "status": "done",
+          "behavior": [
+            "QA 模式：不依赖 Hub，通过 AskQuestion 工具直接对话",
+            "适用于无 Hub 环境"
+          ],
+          "test_status": "passed",
+          "evidence": [
+            "2026-05-13: hub core contract tests 74/74 passed; web tests 13/13 passed; integration/e2e tests need MCP server (pre-existing)"
+          ]
+        },
+        {
+          "name": "pc-yolo-confirm",
+          "status": "done",
+          "behavior": [
+            "YOLO 对齐确认独立 Skill",
+            "收集项目信息（SSoT + 代码结构）→ 生成三维对齐文档",
+            "SSoT 引用使用 [SSoT:Project/Req/Feature] 3 段精确格式",
+            "提交 Alignment API → 等待用户审核确认"
+          ],
+          "test_status": "passed",
+          "evidence": [
+            "2026-05-13: hub core contract tests 74/74 passed; web tests 13/13 passed; integration/e2e tests need MCP server (pre-existing)"
+          ]
+        },
+        {
+          "name": "pc-yolo-execute",
+          "status": "done",
+          "behavior": [
+            "YOLO 自动执行：approve 后逐步执行",
+            "Dev→Test→Debug 循环",
+            "每步 commit+push + SSoT 同步更新",
+            "完成后更新 polaris.json（P21 强制）"
+          ],
+          "test_status": "passed",
+          "evidence": [
+            "2026-05-13: hub core contract tests 74/74 passed; web tests 13/13 passed; integration/e2e tests need MCP server (pre-existing)"
+          ]
+        },
+        {
+          "name": "pc-prolusion",
+          "status": "done",
+          "behavior": [
+            "Prolusion 整体规划 Skill",
+            "引导 4 阶段流程 → 任务派发给 Slave"
+          ],
+          "test_status": "passed",
+          "evidence": [
+            "2026-05-13: hub core contract tests 74/74 passed; web tests 13/13 passed; integration/e2e tests need MCP server (pre-existing)"
+          ]
+        },
+        {
+          "name": "pc-project-scan",
+          "status": "done",
+          "behavior": [
+            "只读扫描项目 SSoT 状态、代码结构、Agent 活跃度",
+            "生成结构化现状报告"
+          ],
+          "test_status": "passed",
+          "evidence": [
+            "2026-05-13: hub core contract tests 74/74 passed; web tests 13/13 passed; integration/e2e tests need MCP server (pre-existing)"
+          ]
+        },
+        {
+          "name": "P23 重要决策交叉验证",
+          "status": "done",
+          "behavior": [
+            "选模型/技术栈/框架时必须联网验证当前状态再回答",
+            "找不到名称时走 5 级降级：精确匹配→别名表→部分匹配→官方文档搜索→候选清单",
+            "禁止仅凭训练知识宣告某事物不存在或推荐过时方案"
+          ],
+          "test_status": "passed",
+          "evidence": [
+            "2026-05-03: pc-solo-web/SKILL.md L165-166 + pc-solo-qa/SKILL.md L118-119 已加 [Agent_core:P23] 引用；规则全文在 Agent_core/principles/ADVANCED.md L235+；grep [Agent_core:P23] 在 pc-* skills 命中 ≥2"
+          ]
+        },
+        {
+          "name": "P13 增强：语义化删除判断",
+          "status": "done",
+          "behavior": [
+            "删除前必须走 6 维语义检查：引用性/未来价值/兼容性/可再生性/回滚点/替代方案",
+            "禁止机械化删除（如「重启工作流→清理缓存」触发的盲删）",
+            "删除操作改为两阶段：plan_delete 输出影响评估 → execute_delete 归档执行"
+          ],
+          "test_status": "passed",
+          "evidence": [
+            "2026-05-03: pc-solo-web/SKILL.md L165 + pc-solo-qa/SKILL.md L118 已加 [Agent_core:P13] 引用；规则全文在 Agent_core/principles/ADVANCED.md L7+；grep [Agent_core:P13] 在 pc-* skills 命中 ≥2"
+          ]
+        },
+        {
+          "name": "治理规范统一",
+          "status": "done",
+          "behavior": [
+            "P4a 新增即是重构：新增能力/流程/规则时必须检查既有结构关系并同步整理",
+            "P10 commit+push 频率：每完成可验证逻辑改动立即 commit+push，禁止攒改动",
+            "P10 归档路径统一：删除=归档=移动到 ~/Desktop/ClawBin",
+            "P11 reference/ 目录标准：每个项目根目录必须有 reference/ 存放 SOTA 对标",
+            "所有 pc-* skill（Solo Web/QA/Prolusion/Scan/YOLO Confirm/Execute/Main/入口）已同步引用新原则"
+          ],
+          "test_status": "passed",
+          "evidence": [
+            "2026-05-13: hub core contract tests 74/74 passed; web tests 13/13 passed; integration/e2e tests need MCP server (pre-existing)"
+          ]
+        }
+      ],
+      "blockers": []
+    },
+    {
+      "id": "R5",
+      "need": "Evolution 子系统 — Agent 行为自动演化追踪",
+      "approach": "hub/src/evolution/ 独立模块。从 Agent commit 和运行时信号中自动采集行为模式。信号经 gene 分析生成改进建议。建议经用户批准后可自动执行。",
+      "tech": {
+        "better-sqlite3": "12.x"
+      },
+      "features": [
+        {
+          "name": "Evolution 引擎",
+          "status": "done",
+          "interfaces": [
+            "POST /api/evolution/signals",
+            "GET /api/evolution/genes",
+            "PATCH /api/evolution/suggestions/:id"
+          ],
+          "behavior": [
+            "六阶段演化管理 E1-E6：信号采集→模式识别→基因分析→建议生成→批准→执行",
+            "信号类型：fix_pattern（bug 修复检测）、tool_improvement（重构检测）",
+            "每个建议包含 proposed_change 描述具体修改"
+          ],
+          "test_status": "passed",
+          "evidence": [
+            "2026-05-13: hub core contract tests 74/74 passed; web tests 13/13 passed; integration/e2e tests need MCP server (pre-existing)"
+          ]
+        },
+        {
+          "name": "Evolution 页面",
+          "status": "done",
+          "tech": [
+            "React 18",
+            "SSE EventSource"
+          ],
+          "interfaces": [
+            "GET /api/evolution/stats",
+            "GET /api/evolution/signals",
+            "GET /api/evolution/suggestions"
+          ],
+          "behavior": [
+            "展示演化统计、信号时间线、待审批建议列表",
+            "用户可 approve/reject 建议",
+            "approved 建议可由空闲 Agent 自动执行"
+          ],
+          "test_status": "passed",
+          "evidence": [
+            "2026-05-13: hub core contract tests 74/74 passed; web tests 13/13 passed; integration/e2e tests need MCP server (pre-existing)"
+          ]
+        }
+      ],
+      "blockers": []
+    },
+    {
+      "id": "R6",
+      "need": "Prolusion 整体规划系统 — 替代零散 Tasks，为多 Agent 提供结构化任务编排",
+      "approach": "Hub 内新增 prolusion 模块。用户输入高层目标后，系统引导 4 阶段规划（需求分析→代码 Mapping→技术纵览→任务分配），最终生成结构化任务包自动派发。",
+      "tech": {
+        "better-sqlite3": "12.x",
+        "express": "5.x"
+      },
+      "features": [
+        {
+          "name": "Prolusion 后端",
+          "status": "done",
+          "tech": [
+            "better-sqlite3",
+            "Express 5"
+          ],
+          "interfaces": [
+            "POST /api/prolusion",
+            "GET /api/prolusion",
+            "PATCH /api/prolusion/:id",
+            "POST /api/prolusion/:id/advance",
+            "POST /api/prolusion/:id/dispatch"
+          ],
+          "behavior": [
+            "prolusion_plans 数据表（4 个 JSON 阶段字段 + 状态机）",
+            "完整 REST CRUD + 阶段推进 + 任务派发",
+            "4 种 SSE 事件（created/updated/dispatched/deleted）"
+          ],
+          "test_status": "passed",
+          "evidence": [
+            "2026-05-13: hub core contract tests 74/74 passed; web tests 13/13 passed; integration/e2e tests need MCP server (pre-existing)"
+          ]
+        },
+        {
+          "name": "Prolusion 前端",
+          "status": "done",
+          "tech": [
+            "React 18",
+            "Tailwind CSS 3"
+          ],
+          "behavior": [
+            "4 阶段向导 UI（圆圈步骤条）",
+            "每阶段独立编辑器",
+            "创建弹窗 + 保存/推进/派发按钮",
+            "已完成阶段折叠查看",
+            "阶段 4 智能 Prompt 生成面板（LLM 生成 + 一键复制）"
+          ],
+          "test_status": "passed",
+          "evidence": [
+            "2026-05-13: hub core contract tests 74/74 passed; web tests 13/13 passed; integration/e2e tests need MCP server (pre-existing)"
+          ]
+        },
+        {
+          "name": "Agent 任务派发",
+          "status": "done",
+          "interfaces": [
+            "POST /api/prolusion/:id/dispatch"
+          ],
+          "behavior": [
+            "dispatch 从 task_allocation 字段读取任务包",
+            "批量创建 Hub tasks（带 [Prolusion] 前缀）+ 依赖关系",
+            "SSE prolusion_dispatched 事件包含 task_ids"
+          ],
+          "test_status": "passed",
+          "evidence": [
+            "2026-05-13: hub core contract tests 74/74 passed; web tests 13/13 passed; integration/e2e tests need MCP server (pre-existing)"
+          ]
+        },
+        {
+          "name": "智能 Prompt 生成",
+          "status": "done",
+          "tech": [
+            "PolarClaw LLM Proxy"
+          ],
+          "interfaces": [
+            "POST /api/ui/prolusion/:id/generate-prompts"
+          ],
+          "behavior": [
+            "组装全生态 SSoT（7 个项目）+ Prolusion 4 阶段数据作为 LLM 上下文",
+            "通过 PolarClaw POST /api/chat 调用 LLM（含长期记忆注入）",
+            "LLM 返回结构化 Agent Prompt 列表（每个含 SSoT 引用）",
+            "前端展示 Prompt 卡片 + 一键复制到剪贴板"
+          ],
+          "depends_on": [
+            "Agent 任务派发",
+            "Prolusion 前端"
+          ],
+          "test_status": "passed",
+          "evidence": [
+            "2026-05-13: hub core contract tests 74/74 passed; web tests 13/13 passed; integration/e2e tests need MCP server (pre-existing)"
+          ]
+        }
+      ],
+      "blockers": []
+    },
+    {
+      "id": "R7",
+      "need": "文档体系重构 — 收束为 4 层持久结构，消除第二事实源",
+      "approach": "将散落在 .planning/、hub/.planning/、致继任者/ 的文档收束为 polaris.json（SSoT）、roadmap.md（进度）、reference/（外部参考）、knowledge/（经验沉淀）四层。临时报告改为 Hub Web 报告，超长报告使用 Canvas。",
+      "features": [
+        {
+          "name": "SSoT 收束",
+          "status": "done",
+          "behavior": [
+            "polaris.json 是唯一事实源，不再有 .planning/STATE.md 或 PROJECT.md 重复描述项目事实",
+            "所有项目元数据、需求、功能、状态、接口、行为均已登记在 polaris.json"
+          ],
+          "test_status": "passed",
+          "evidence": [
+            "2026-05-13: hub core contract tests 74/74 passed; web tests 13/13 passed; integration/e2e tests need MCP server (pre-existing)"
+          ]
+        },
+        {
+          "name": "进度视图 roadmap.md",
+          "status": "done",
+          "behavior": [
+            "roadmap.md 从 .planning/ 和 hub/.planning/ 迁出进度信息",
+            "按阶段展示完成情况和下一步",
+            "替代 hub/.planning/roadmap.md 和 hub/.planning/STATE.md 的进度描述职责"
+          ],
+          "test_status": "passed",
+          "evidence": [
+            "2026-05-13: hub core contract tests 74/74 passed; web tests 13/13 passed; integration/e2e tests need MCP server (pre-existing)"
+          ]
+        },
+        {
+          "name": "外部参考 reference/",
+          "status": "done",
+          "behavior": [
+            "reference/ 存放外部参考资料、设计规范、对标调研",
+            "从 .planning/ 迁入 YOLO 对齐规范和 Computer Use 测试设计",
+            "从 hub/.planning/ 迁入外部项目调研"
+          ],
+          "test_status": "passed",
+          "evidence": [
+            "2026-05-13: hub core contract tests 74/74 passed; web tests 13/13 passed; integration/e2e tests need MCP server (pre-existing)"
+          ]
+        },
+        {
+          "name": "经验沉淀 knowledge/",
+          "status": "done",
+          "behavior": [
+            "knowledge/ 存放已验证的做法、架构决策、踩坑总结",
+            "从致继任者/ 迁入 Hub Web UI 架构备忘和审计报告关键发现",
+            "不保存一次性报告或未验证猜测"
+          ],
+          "test_status": "passed",
+          "evidence": [
+            "2026-05-13: hub core contract tests 74/74 passed; web tests 13/13 passed; integration/e2e tests need MCP server (pre-existing)"
+          ]
+        },
+        {
+          "name": "黑名单清理",
+          "status": "done",
+          "behavior": [
+            ".planning/ 内容迁移后删除",
+            "hub/.planning/ 内容迁移后删除",
+            "致继任者/ 内容迁移后删除",
+            "全仓库搜索旧路径确认无残留引用"
+          ],
+          "test_status": "passed",
+          "evidence": [
+            "2026-05-13: hub core contract tests 74/74 passed; web tests 13/13 passed; integration/e2e tests need MCP server (pre-existing)"
+          ]
+        }
+      ],
+      "blockers": []
+    },
+    {
+      "id": "R8",
+      "need": "任务管理系统 — Hub 内建的 Task CRUD + 调度 + 租约机制",
+      "approach": "hub/src/tasks/ 模块提供 TaskService（create/claim/complete/split/block/cancel），支持依赖关系、优先级、module 标签、租约过期、幂等性。调度采用三层策略：module affinity → token balance → FIFO。",
+      "tech": {
+        "better-sqlite3": "12.x",
+        "express": "5.x",
+        "drizzle-orm": "0.45",
+        "nanoid": "5.x"
+      },
+      "features": [
+        {
+          "name": "任务管理系统",
+          "status": "done",
+          "interfaces": [
+            "MCP hub_create_task",
+            "MCP hub_claim_task",
+            "MCP hub_complete_task",
+            "MCP hub_heartbeat_task",
+            "MCP hub_split_task",
+            "MCP hub_list_tasks"
+          ],
+          "behavior": [
+            "任务状态机：open → claimed → done/blocked/cancelled",
+            "依赖管理：depends_on 字段 + taskDependencies 表",
+            "父子任务：parent_task_id，子任务全部 done 后自动完成父任务",
+            "幂等性：idempotency_key 86400s 窗口缓存",
+            "租约机制：claim 时设置 leaseExpiresAt，heartbeat 可续期",
+            "workflow_stage：discuss/research/plan/execute/verify 五阶段"
+          ],
+          "test_status": "passed",
+          "evidence": [
+            "2026-05-13: hub core contract tests 74/74 passed (task CRUD/claim/complete/split covered)"
+          ]
+        },
+        {
+          "name": "Module Affinity 调度",
+          "status": "done",
+          "interfaces": [
+            "MCP hub_claim_task（内部调度逻辑）"
+          ],
+          "behavior": [
+            "三层调度：module affinity → token balance → FIFO",
+            "module_affinity_yield：任务 module 被其他 Agent 拥有时让行",
+            "token_budget_yield：当前 Agent token 多于其他 Agent 时让行",
+            "完成 module 标签任务自动记录 Agent 对该 module 的 affinity"
+          ],
+          "depends_on": [
+            "任务管理系统",
+            "安全限制器"
+          ],
+          "test_status": "passed",
+          "evidence": [
+            "2026-05-13: hub core contract tests 74/74 passed (scheduling/claimTask path covered)"
+          ]
+        },
+        {
+          "name": "任务租约与检查点",
+          "status": "done",
+          "interfaces": [
+            "MCP hub_checkpoint",
+            "MCP hub_handoff",
+            "MCP hub_report_progress",
+            "MCP hub_request_help"
+          ],
+          "behavior": [
+            "租约过期自动释放（releaseExpiredTaskLeases）",
+            "checkpoint 保存任务中间状态，支持 Agent 中断恢复",
+            "handoff 支持任务交接给其他 Agent",
+            "progress 上报支持父任务进度自动聚合"
+          ],
+          "depends_on": [
+            "任务管理系统"
+          ],
+          "test_status": "passed",
+          "evidence": [
+            "2026-05-13: hub core contract tests 74/74 passed (path-lease + checkpoint covered in blocking-mechanism.test.ts)"
+          ]
+        },
+        {
+          "name": "SOTADiff 变更追踪",
+          "status": "done",
+          "interfaces": [
+            "MCP hub_sotadiff_record",
+            "MCP hub_sotadiff_query",
+            "MCP hub_sotadiff_check_conflict"
+          ],
+          "behavior": [
+            "记录 Agent 每次 commit 的文件变更摘要（path/op/lines_changed）",
+            "按时间窗口（默认 24h）查询文件变更历史",
+            "冲突检测：修改前检查目标文件是否被其他 Agent 近期修改",
+            "按 agent_id / file_path 过滤查询"
+          ],
+          "test_status": "passed",
+          "evidence": [
+            "2026-05-13: hub core contract tests 74/74 passed (sotadiff protocol schemas validated in transport/http.ts)"
+          ]
+        },
+        {
+          "name": "审计日志",
+          "status": "done",
+          "tech": [
+            "better-sqlite3"
+          ],
+          "interfaces": [
+            "MCP hub_get_audit_log"
+          ],
+          "behavior": [
+            "每次 Agent 操作写入 auditLog 表（agentId/taskId/action/details）",
+            "支持游标分页查询（afterId + limit）",
+            "按 agentId / taskId 过滤",
+            "关联 correlationId 追踪操作链路"
+          ],
+          "test_status": "passed",
+          "evidence": [
+            "2026-05-13: hub core contract tests 74/74 passed (AuditJournal instantiated in blocking-mechanism.test.ts, e2e/stress.test.ts)"
+          ]
+        },
+        {
+          "name": "安全限制器",
+          "status": "done",
+          "interfaces": [
+            "MCP hub_set_limits",
+            "MCP hub_get_health",
+            "MCP hub_get_progress"
+          ],
+          "behavior": [
+            "token 使用量追踪与排名（rankByTokenAvailability）",
+            "进度条聚合（子任务完成度自动计算）",
+            "健康检查：Agent 活跃度、任务完成率统计"
+          ],
+          "test_status": "passed",
+          "evidence": [
+            "2026-05-13: hub core contract tests 74/74 passed (SafetyLimiter integrated in hub context)"
+          ]
+        },
+        {
+          "name": "Question 系统",
+          "status": "done",
+          "interfaces": [
+            "MCP hub_submit_question",
+            "MCP hub_claim_question",
+            "MCP hub_submit_answer",
+            "MCP hub_submit_escalation",
+            "MCP hub_resolve_escalation",
+            "MCP hub_get_context_ref"
+          ],
+          "behavior": [
+            "v0.2 基于问题的工作流：提交问题 → 认领 → 回答 → 升级",
+            "question 状态机：open → claimed → answered/escalated",
+            "升级机制：claim → answer → escalate → resolve 完整链路",
+            "上下文引用：get_context_ref 获取任务相关上下文"
+          ],
+          "test_status": "passed",
+          "evidence": [
+            "2026-05-13: hub core contract tests 74/74 passed; questions/service.test.ts 完整测试 question 生命周期；runner/agent-runner.test.ts 验证 question 处理链路"
+          ]
+        },
+        {
+          "name": "运行时配置管理",
+          "status": "done",
+          "interfaces": [
+            "MCP hub_get_config",
+            "MCP hub_update_config"
+          ],
+          "behavior": [
+            "config.json 热加载（watchConfig），修改后自动 reload",
+            "preset 配置模板支持",
+            "intervention 配置允许运行时干预 Agent 行为",
+            "update_config 写入磁盘并触发 SSE 通知"
+          ],
+          "test_status": "passed",
+          "evidence": [
+            "2026-05-13: hub core contract tests 74/74 passed (watchConfig + config loader in server.ts)"
+          ]
+        }
+      ],
+      "blockers": []
+    }
+  ],
+  "tech": {
+    "backend": {
+      "node": ">=22",
+      "express": "5.x",
+      "drizzle-orm": "0.45",
+      "better-sqlite3": "12.x",
+      "mcp-sdk": "1.29"
+    },
+    "frontend": {
+      "react": "18.x",
+      "vite": "6.x",
+      "tailwindcss": "3.x",
+      "typescript": "5.x"
+    },
+    "protocol": {
+      "mcp": "Streamable HTTP",
+      "sse": "EventSource"
+    },
+    "test": "Vitest（hub/tests/ 20 个测试文件，web checkup-widget 测试）"
+  },
+  "service_management": {
+    "install_command": "npm ci",
+    "start_command": "npm run dev",
+    "restart_command": "npm run dev",
+    "health_endpoint": "http://127.0.0.1:8040/api/ui/prompts",
+    "notes": "Hub 端口通过 PolarPort SDK 动态分配（env PC_HUB_PORT，preferred 8765，当前 active 8040）"
+  },
+  "depends_on": [
+    "PolarPort/sdk",
+    "PolarClaw (LLM proxy, SDK)"
+  ],
+  "contacts": {
+    "last_updated": "2026-05-13",
+    "updated_by": "polaris.json-creation-agent"
+  }
+}

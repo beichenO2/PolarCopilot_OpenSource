@@ -1,0 +1,190 @@
+{
+  "name": "polarcop-vscode",
+  "description": "PolarCopilot VSCode/Cursor 插件 — IDE 入口通道：侧边栏 WebView 对话面板、SSE 流式响应、代码选中注入、多会话管理、文本批注。",
+  "tier": "supporting",
+  "status": "active",
+  "version": "0.3.8",
+  "requirements": [
+    {
+      "id": "E1",
+      "need": "IDE 入口通道 — 侧边栏对话面板与 PolarClaw 后端通信",
+      "approach": "VSCode WebviewViewProvider + PolarClawClient (SSE streaming) + 内嵌 HTML/CSS/JS",
+      "features": [
+        {
+          "name": "侧边栏对话面板",
+          "description": "WebView 聊天界面，支持用户/助手/错误三种消息样式、多会话管理、消息自动滚动",
+          "status": "done",
+          "behavior": [
+            "注册 polarclaw.chat WebviewView，挂载到 activitybar 的 polarclaw-sidebar 容器",
+            "内嵌 HTML 包含 messages 容器 + input-area（输入框 + 发送按钮）",
+            "消息分三种 CSS class：user（靠右）、assistant（靠左）、error（红色边框）",
+            "使用 VSCode 主题变量（--vscode-editor-background 等）保持视觉一致",
+            "支持 Cmd+Enter 发送、Shift+Enter 换行",
+            "支持 clearHistory WebView 消息清空",
+            "多会话管理：标签页切换、新建、删除、重命名",
+            "文本选中批注：选中回复文本→弹窗输入批注→badge 显示→随消息发送"
+          ],
+          "test_status": "not_tested",
+          "evidence": [
+            "src/sidebar/SidebarProvider.ts resolveWebviewView + _getHtml 实现",
+            "2026-05-18: 反身性探查确认功能完整"
+          ]
+        },
+        {
+          "name": "SSE 流式通信",
+          "description": "POST /api/agent/chat/stream 发送消息，SSE 流式接收 StreamEvent 并实时渲染",
+          "status": "done",
+          "behavior": [
+            "PolarClawClient.chat() 通过 Node.js http/https 模块发起 POST 请求",
+            "请求体: { message, conversation_id? }",
+            "携带 X-Entry-Type header（默认 'ide'），Accept: text/event-stream",
+            "SSE 解析：event:/data: 行解析，JSON.parse 为 StreamEvent 类型",
+            "StreamEvent 支持 6 种类型：thinking/tool_call/tool_result/chunk/done/error",
+            "done 事件的 content 字段通过 onChunk 回调传递",
+            "thinking/tool_call/tool_result 通过 onEvent 回调传递给 WebView streamEvent 处理",
+            "typing indicator 显示当前轮次（thinking）、工具名（tool_call）、完成（tool_result）",
+            "错误时通过 WebView 消息类型 'error' 展示错误信息"
+          ],
+          "test_status": "not_tested",
+          "evidence": [
+            "src/api/client.ts PolarClawClient.chat() SSE 解析实现",
+            "src/sidebar/SidebarProvider.ts streamEvent case L842-856",
+            "2026-05-18: 反身性探查确认端到端链路完整"
+          ]
+        },
+        {
+          "name": "代码选中注入",
+          "description": "PolarCopilot: Send Selection to Chat 命令，将编辑器选中文本发送至对话面板",
+          "status": "done",
+          "behavior": [
+            "注册 polarcop.sendSelection 命令",
+            "获取 activeTextEditor.selection 对应的文本",
+            "通过 sidebarProvider.sendMessage(text) 发送到 WebView",
+            "先显示为用户消息，再触发后端 chat 请求"
+          ],
+          "test_status": "not_tested",
+          "evidence": [
+            "src/extension.ts polarclaw.sendSelection 命令注册",
+            "src/sidebar/SidebarProvider.ts sendMessage() 方法"
+          ]
+        },
+        {
+          "name": "配置管理",
+          "description": "VSCode settings 中 polarcop.serverUrl 和 polarcop.entryType 两项配置",
+          "status": "done",
+          "behavior": [
+            "polarcop.serverUrl: string, 默认 http://localhost:3910",
+            "polarcop.entryType: enum ['ide', 'web'], 默认 'ide'",
+            "getConfig() 从 vscode.workspace.getConfiguration 读取并返回 PolarClawConfig 对象",
+            "updateConfig() 通过 ConfigurationTarget.Global 写入全局设置",
+            "validateServerUrl() 校验 URL 合法性（http/https 协议）"
+          ],
+          "test_status": "not_tested",
+          "evidence": [
+            "src/utils/config.ts getConfig / updateConfig / validateServerUrl 实现",
+            "package.json contributes.configuration 声明"
+          ]
+        },
+        {
+          "name": "健康检查",
+          "description": "客户端内置 GET /api/status 探测，确认 PolarClaw 后端可达性",
+          "status": "done",
+          "behavior": [
+            "PolarClawClient.healthCheck() 发起 GET {baseUrl}/api/status 请求",
+            "返回 true 当 statusCode === 200，否则返回 false",
+            "网络错误时优雅降级返回 false，不抛出异常"
+          ],
+          "test_status": "not_tested",
+          "evidence": [
+            "src/api/client.ts PolarClawClient.healthCheck() 实现"
+          ]
+        },
+        {
+          "name": "扩展生命周期",
+          "description": "onStartupFinished 自动激活，deactivate 优雅退出",
+          "status": "done",
+          "behavior": [
+            "activationEvents: onStartupFinished — VSCode 启动完成后自动激活",
+            "activate() 读取配置 → 注册 WebviewViewProvider → 注册 openChat / sendSelection 命令",
+            "deactivate() 打印退出日志"
+          ],
+          "test_status": "not_tested",
+          "evidence": [
+            "src/extension.ts activate / deactivate 实现",
+            "package.json activationEvents 声明"
+          ]
+        }
+      ],
+      "blockers": [
+        "零测试覆盖：src/__tests__/ 目录尚未创建，所有功能 test_status 为 not_tested",
+        "renderMarkdown 手写正则不支持表格和水平分隔线（考虑引入 marked/markdown-it）",
+        "SSE onChunk 仅在 done 事件触发，非真正增量流式文本输出"
+      ]
+    },
+    {
+      "id": "E2",
+      "need": "StepFlow v2 — 分层任务树 UI 展示 Agent 执行逻辑",
+      "approach": "WebView 内 HTML/CSS/JS 实现可折叠任务树面板，参考 Gemini CLI 风格",
+      "features": [
+        {
+          "name": "StepFlow 分层面板",
+          "description": "实时展示 Agent 的 thinking/tool_call/tool_result 事件为可视化步骤树",
+          "status": "done",
+          "behavior": [
+            "stepflow-panel div 包含 sf-tree 容器",
+            "每个 step 节点由 sf-row（图标+标签）+ sf-detail（可折叠详情）组成",
+            "状态图标：⏳ running / ✅ done / ❌ error / ⏸ pending",
+            "handleStepFlowEvent(evt) 根据 SSE event 类型分发处理",
+            "thinking 事件 → 创建新节点或更新 round 数",
+            "tool_call → 添加工具节点 running 状态",
+            "tool_result → 更新对应工具节点为 done/error",
+            "支持折叠/展开详细内容"
+          ],
+          "test_status": "not_tested",
+          "evidence": [
+            "src/sidebar/SidebarProvider.ts initStepFlowPanel + addStepNode + updateLastStepStatus",
+            "2026-05-18: StepFlow v2 commit 4321dbb"
+          ]
+        },
+        {
+          "name": "后端对话历史管理",
+          "description": "从 PolarClaw 后端 API 加载对话历史，支持本地/远程双源",
+          "status": "done",
+          "behavior": [
+            "loadBackendHistory WebView 消息触发远程对话列表加载",
+            "GET /api/conversations → 获取会话列表",
+            "GET /api/conversations/:id → 获取单个会话的完整消息",
+            "History 面板区分本地 (LocalStorage) 和服务器 (PolarClaw) 两类来源"
+          ],
+          "test_status": "not_tested",
+          "evidence": [
+            "src/sidebar/SidebarProvider.ts _loadBackendConversations + _loadBackendConversation",
+            "2026-05-18: commit 4321dbb"
+          ]
+        }
+      ]
+    }
+  ],
+  "tech": {
+    "runtime": {
+      "vscode": ">=1.85.0",
+      "node": ">=20（@types/node ^20.10.0）"
+    },
+    "language": "TypeScript 5.3",
+    "build": "tsc -p ./",
+    "package": "@vscode/vsce",
+    "lint": "eslint src --ext ts"
+  },
+  "service_management": {
+    "install_command": "npm install",
+    "start_command": "npm run watch (F5 in VSCode)",
+    "package_command": "npm run package"
+  },
+  "depends_on": [
+    "PolarClaw (POST /api/agent/chat/stream + GET /api/status)"
+  ],
+  "contacts": {
+    "last_updated": "2026-05-18",
+    "updated_by": "hw-724e5eaa (反身性探查)"
+  }
+}

@@ -10,22 +10,7 @@ interface Props {
   collapseBreakpoint?: number
   collapsed?: boolean
   onCollapsedChange?: (collapsed: boolean) => void
-  /** Persist split ratio to localStorage (e.g. `pc-prompts-history-ratio`) */
-  storageKey?: string
-  /** Label for collapse toggle (accessibility) */
-  paneLabel?: string
   className?: string
-}
-
-function readStoredRatio(key: string, fallback: number): number {
-  try {
-    const raw = localStorage.getItem(key)
-    if (!raw) return fallback
-    const n = Number(raw)
-    return Number.isFinite(n) && n > 0.1 && n < 0.9 ? n : fallback
-  } catch {
-    return fallback
-  }
 }
 
 export function ResizableSplitPane({
@@ -33,18 +18,14 @@ export function ResizableSplitPane({
   right,
   defaultRatio = 0.35,
   minLeftPx = 220,
-  minRightPx = 280,
+  minRightPx = 400,
   collapseBreakpoint = 900,
   collapsed: controlledCollapsed,
   onCollapsedChange,
-  storageKey,
-  paneLabel = '侧边栏',
   className,
 }: Props) {
   const containerRef = useRef<HTMLDivElement>(null)
-  const [ratio, setRatio] = useState(() =>
-    storageKey ? readStoredRatio(storageKey, defaultRatio) : defaultRatio,
-  )
+  const [ratio, setRatio] = useState(defaultRatio)
   const [dragging, setDragging] = useState(false)
   const [internalCollapsed, setInternalCollapsed] = useState(false)
   const [autoCollapsed, setAutoCollapsed] = useState(false)
@@ -53,13 +34,6 @@ export function ResizableSplitPane({
   const setCollapsed = useCallback((v: boolean) => {
     onCollapsedChange ? onCollapsedChange(v) : setInternalCollapsed(v)
   }, [onCollapsedChange])
-
-  useEffect(() => {
-    if (!storageKey || dragging) return
-    try {
-      localStorage.setItem(storageKey, String(ratio))
-    } catch { /* quota */ }
-  }, [ratio, storageKey, dragging])
 
   useEffect(() => {
     const check = () => {
@@ -114,10 +88,7 @@ export function ResizableSplitPane({
 
   const handleDoubleClick = useCallback(() => {
     setRatio(defaultRatio)
-    if (storageKey) {
-      try { localStorage.removeItem(storageKey) } catch { /* ignore */ }
-    }
-  }, [defaultRatio, storageKey])
+  }, [defaultRatio])
 
   return (
     <div ref={containerRef} className={clsx('flex h-full relative', className)}>
@@ -131,9 +102,6 @@ export function ResizableSplitPane({
           </div>
 
           <div
-            role="separator"
-            aria-orientation="vertical"
-            aria-label={`调整${paneLabel}宽度，双击恢复默认`}
             onMouseDown={handleMouseDown}
             onDoubleClick={handleDoubleClick}
             className={clsx(
@@ -153,7 +121,6 @@ export function ResizableSplitPane({
       <div className="flex-1 overflow-y-auto min-w-0">
         <div className="flex items-center">
           <button
-            type="button"
             onClick={() => setCollapsed(!collapsed)}
             className={clsx(
               'flex-shrink-0 w-7 h-7 flex items-center justify-center rounded transition-colors text-xs',
@@ -161,7 +128,7 @@ export function ResizableSplitPane({
                 ? 'text-hub-accent hover:bg-hub-accent/10 ml-1 mt-1'
                 : 'text-hub-text-muted hover:text-hub-accent absolute top-1 left-1 z-10',
             )}
-            title={collapsed ? `展开${paneLabel}` : `折叠${paneLabel}`}
+            title={collapsed ? '展开 SSoT 侧边栏' : '折叠 SSoT 侧边栏'}
           >
             {collapsed ? '▶' : '◀'}
           </button>

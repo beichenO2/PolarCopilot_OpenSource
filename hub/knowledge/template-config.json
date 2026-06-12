@@ -1,0 +1,24 @@
+{
+  "workflow": {
+    "mode": "yolo",
+    "granularity": "standard",
+    "parallel_execution": true,
+    "commit_planning_docs": true,
+    "research_enabled": true,
+    "plan_checker_enabled": true,
+    "verifier_enabled": true
+  },
+  "model_profile": "inherit",
+  "human_intervention": "requirements_only",
+  "planning": {
+    "commit_docs": true,
+    "search_gitignored": false,
+    "sub_repos": []
+  },
+  "git": {
+    "branching_strategy": "none",
+    "base_branch": null,
+    "phase_branch_template": "gsd/phase-{phase}-{slug}",
+    "milestone_branch_template": "gsd/{milestone}-{slug}"
+  }
+}

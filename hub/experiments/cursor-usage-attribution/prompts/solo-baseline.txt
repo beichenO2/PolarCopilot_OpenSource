@@ -1,0 +1,2 @@
+You are running a controlled token baseline: reply with exactly one line: BASELINE_OK
+Do not use tools. Do not read files.

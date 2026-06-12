@@ -1,0 +1,24 @@
+{
+  "name": "@polarcop/checkup-widget",
+  "version": "0.1.0",
+  "description": "Embeddable <polar-checkup> Web Component for the Polarisor ecosystem. Captures a screenshot, lets the user crop+annotate, and POSTs a schema-validated checkup-event to PolarCopilot Hub.",
+  "type": "module",
+  "main": "dist/checkup-widget.umd.js",
+  "module": "dist/checkup-widget.es.js",
+  "exports": {
+    ".": {
+      "import": "./dist/checkup-widget.es.js",
+      "require": "./dist/checkup-widget.umd.js"
+    }
+  },
+  "files": [
+    "dist",
+    "README.md"
+  ],
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/beichenO2/PolarCopilot.git",
+    "directory": "web/checkup-widget"
+  }
+}

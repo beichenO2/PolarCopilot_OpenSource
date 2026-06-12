@@ -1,0 +1,113 @@
+{
+  "name": "polarcop-vscode",
+  "displayName": "PolarCopilot",
+  "description": "PolarCopilot IDE Agent — AI 对话面板，连接 PolarClaw Agent 后端",
+  "version": "0.3.8",
+  "publisher": "polarisor",
+  "engines": {
+    "vscode": "^1.85.0"
+  },
+  "categories": [
+    "AI",
+    "Chat"
+  ],
+  "activationEvents": [
+    "onStartupFinished"
+  ],
+  "main": "./out/extension.js",
+  "icon": "media/icon.png",
+  "contributes": {
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "polarcop-sidebar",
+          "title": "PolarCopilot",
+          "icon": "media/icon.svg"
+        }
+      ]
+    },
+    "views": {
+      "polarcop-sidebar": [
+        {
+          "type": "webview",
+          "id": "polarcop.chat",
+          "name": "Chat"
+        }
+      ]
+    },
+    "commands": [
+      {
+        "command": "polarcop.openChat",
+        "title": "PolarCopilot: Open Chat"
+      },
+      {
+        "command": "polarcop.sendSelection",
+        "title": "PolarCopilot: Send Selection to Chat"
+      },
+      {
+        "command": "polarcop.clearHistory",
+        "title": "PolarCopilot: Clear Chat History"
+      },
+      {
+        "command": "polarcop.checkConnection",
+        "title": "PolarCopilot: Check Server Connection"
+      }
+    ],
+    "keybindings": [
+      {
+        "command": "polarcop.sendSelection",
+        "key": "ctrl+shift+l",
+        "mac": "cmd+shift+l",
+        "when": "editorHasSelection"
+      }
+    ],
+    "configuration": {
+      "title": "PolarCopilot",
+      "properties": {
+        "polarcop.serverUrl": {
+          "type": "string",
+          "default": "http://localhost:3910",
+          "description": "PolarClaw Agent 后端地址"
+        },
+        "polarcop.entryType": {
+          "type": "string",
+          "default": "ide",
+          "enum": [
+            "ide",
+            "web"
+          ],
+          "description": "入口类型，决定 PolarClaw 使用的 Prompt 模板"
+        },
+        "polarcop.userId": {
+          "type": "string",
+          "default": "",
+          "description": "用户 ID（留空则使用系统用户名）"
+        }
+      }
+    }
+  },
+  "scripts": {
+    "copy-marked": "cp node_modules/marked/lib/marked.umd.js media/marked.umd.js",
+    "vscode:prepublish": "npm run copy-marked && npm run compile",
+    "compile": "tsc -p ./",
+    "watch": "tsc -watch -p ./",
+    "lint": "eslint src --ext ts",
+    "package": "npm run copy-marked && vsce package"
+  },
+  "dependencies": {
+    "marked": "^18.0.3"
+  },
+  "devDependencies": {
+    "@types/node": "^20.10.0",
+    "@types/vscode": "^1.85.0",
+    "typescript": "^5.3.0"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/polarisor/polarcop-vscode"
+  },
+  "license": "MIT",
+  "dependencies": {
+    "marked": "^18.0.3"
+  }
+}

@@ -1,0 +1,38 @@
+name: SSOT PR Gate
+
+on:
+  pull_request:
+    branches: [main]
+
+jobs:
+  ssot-gate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Run SSOT PR Gate
+        run: |
+          # If this repo IS Agent_core, run gate on self
+          if [ -f "scripts/ssot-pr-gate.sh" ]; then
+            bash scripts/ssot-pr-gate.sh .
+          # If Agent_core is a submodule
+          elif [ -f "Agent_core/scripts/ssot-pr-gate.sh" ]; then
+            bash Agent_core/scripts/ssot-pr-gate.sh .
+          # Fallback: download the gate script from Agent_core
+          else
+            curl -sL https://raw.githubusercontent.com/beichenO2/Agent_core/main/scripts/ssot-pr-gate.sh -o /tmp/ssot-pr-gate.sh
+            bash /tmp/ssot-pr-gate.sh .
+          fi
+
+      - name: Gate Summary
+        if: always()
+        run: |
+          echo "## SSOT PR Gate Results" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "Run \`bash Agent_core/scripts/ssot-pr-gate.sh .\` locally to debug failures." >> $GITHUB_STEP_SUMMARY

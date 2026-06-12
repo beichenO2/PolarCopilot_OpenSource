@@ -1,0 +1,41 @@
+{
+  "project": "gsd-2",
+  "version": "0.4.0",
+  "capabilities": [
+    {
+      "id": "gsd.hub.tasks",
+      "service_name": "gsd-hub",
+      "description": "GSD-2 MCP Hub — 任务管理和 Agent 协调",
+      "transport": "http",
+      "endpoint": "/mcp",
+      "method": "POST",
+      "idempotent": false,
+      "side_effects": true,
+      "timeout_ms": 30000
+    },
+    {
+      "id": "polarcop.hub.checkup-event",
+      "service_name": "polarcop-hub",
+      "description": "Receives cross-project checkup events (bug reports from any project frontend) and routes them to the responsible project Agent via .inbox topic; mirrors each event to SOTAgent aggregation channel. Body must conform to Agent_core/contracts/checkup-event.schema.json.",
+      "transport": "http",
+      "endpoint": "/api/checkup-event",
+      "method": "POST",
+      "idempotent": true,
+      "side_effects": true,
+      "timeout_ms": 5000,
+      "schema": "Agent_core/contracts/checkup-event.schema.json"
+    },
+    {
+      "id": "polarcop.hub.lobster.events",
+      "service_name": "polarcop-hub",
+      "description": "Receives lobster inbox-outbox events and routes them to target agent .inbox topics via BroadcastPublisher. Semantically compatible with SOTAgent inbox-outbox.schema.json.",
+      "transport": "http",
+      "endpoint": "/api/lobster/events",
+      "method": "POST",
+      "idempotent": true,
+      "side_effects": true,
+      "timeout_ms": 5000,
+      "schema": "PolarCopilot/hub/contracts/lobster-event.schema.json"
+    }
+  ]
+}

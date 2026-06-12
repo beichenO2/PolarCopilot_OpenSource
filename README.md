@@ -1,286 +1,214 @@
-# PolarCopilot（开源版）
+# PolarCopilot
 
-![Included Usage：超额用量效果示意](docs/images/00-included-usage-overage.png)
+**在 Cursor 里开多个 Agent 对话时，用浏览器统一指挥、对齐、审计——而不是在 N 个聊天窗口里来回切换。**
 
-*上图：长时间用 **Solo Web + YOLO** 驱动 Agent 连续跑任务时，Cursor **Included Usage** 的典型「超额」账单效果（示例数据，仅供感受规模）。*
-
----
-
-**一个 Cursor 对话 + 一个 Hub 网页。** Agent 通过 MCP 连本地 Hub；你在浏览器里点选回复、做 YOLO 对齐。
-
-> **本文档是唯一入口。** 先看 **「给人看的操作清单」**；装环境时对 Agent 说 **「按照 README 完成部署」**，Agent 按 **「给 Agent 的执行清单」** 操作。  
-> 截图在 **`docs/images/`**，下文用 Markdown 标准语法引用；请用 Cursor **打开本仓库根目录** 预览，才能看到图。
+PolarCopilot 是 Polarisor 生态的 **多 Agent 编排 Hub**：本地 Express 后端 + React Web UI，通过 **MCP Streamable HTTP** 与 Cursor 双向通信，用 **SSE 实时推送** 替代传统 HTTP 轮询。GitHub：[beichenO2/PolarCopilot](https://github.com/beichenO2/PolarCopilot)
 
 ---
 
-## 给人看的操作清单
+## 安装
 
-按**时间顺序**执行。带 **【你亲手】** 的步骤 Agent 无法代替。
+### Polarisor 生态（推荐）
 
-| 顺序 | 谁来做 | 做什么 |
-|:----:|:------:|--------|
-| **1** | **【你亲手】** | 用 Cursor **打开本仓库根目录**（能看到 `hub/`、`web/`、`README.md`、`docs/images/`）。 |
-| **2** | 你 → Agent | 对话发送：**「按照 README 完成部署」** 或 `/pc-os-start`，等 Agent 完成安装、构建、写配置、启动 Hub。 |
-| **3** | **【你亲手】** | **Settings → MCP** → 打开 **`hub-agent-1`**（或 `project-…-hub-agent-1`）→ **Reload MCP**，直到无报错。 |
-| **4** | 你 | 浏览器打开 **http://127.0.0.1:8040/**，确认只有 **Agent 控制**、**YOLO** 两个页签。 |
-| **5** | 你 | 对话发送 **`/pc-os-solo-web`**，进入网页控制循环。 |
-| **6** | **【你亲手】** | 之后 Agent 在网页提问时，**在 Hub 网页点选项**回复（不要只在 Cursor 里打字）。 |
-
-### 只有你能做的两件事
-
-1. **Cursor 里打开 MCP 并 Reload**（第 3 步）  
-2. **在 Hub 网页上点选回复**（第 6 步）——Solo Web 以网页按钮为输入源
-
-### 自己敲命令（不用 Agent）
+适合已克隆 [Polarisor](https://github.com/beichenO2/Polarisor) 全栈、需要 SSoT / YOLO / 进化等完整能力的场景。
 
 ```bash
-cd /你的路径/PolarCopilot_Opensource
-npm run setup
-bash scripts/start-hub.sh
-curl -s http://127.0.0.1:8040/api/ui/health   # 应含 "ok"
+git clone https://github.com/beichenO2/Polarisor.git
+cd Polarisor
+
+# 安装 Hub 依赖并构建 Web UI
+cd PolarCopilot/hub && npm install
+cd ../web && npm install && npm run build
+
+# 启动 Hub（自动发现端口，默认 8040）
+bash Agent_core/scripts/solo-web-startup.sh 1
 ```
 
-然后仍须完成上表 **第 3～6 步**。
+在 Cursor **Settings → MCP** 中启用 `hub-agent-1`（或 `project-…-hub-agent-1`）并 **Reload**。浏览器打开 `http://127.0.0.1:8040/pc/`，在 Cursor 发送 `$pc-solo-web` 进入网页控制循环。
 
----
+> 精简独立版（仅 Agent 控制 + YOLO 两页）见 [PolarCopilot_Opensource](https://github.com/beichenO2/PolarCopilot) 分支/README，含 `npm run setup` 一键脚本。
 
-## 给 Agent 的执行清单
+### 独立安装
 
-**触发词**：「按照 README 完成部署」「按 README 装好」、`/pc-os-start`
-
-| 步骤 | 动作 | 说明 |
-|:----:|------|------|
-| A1 | 检查环境 | `node -v`（建议 ≥ 22）、`npm -v` |
-| A2 | 安装与构建 | `npm run install:all` → `npm run build:web`，或 `npm run setup` |
-| A3 | 写 MCP 配置 | `bash scripts/setup-mcp.sh` |
-| A4 | **暂停** | 提醒用户完成 **操作清单第 3 步**（MCP 开关 + Reload） |
-| A5 | 启动 Hub | `bash scripts/start-hub.sh` |
-| A6 | 自检 | `curl …/api/ui/health` 为 ok；失败看 `/tmp/pc-os-hub.log` |
-| A7 | **收尾** | 请用户打开浏览器、`/pc-os-solo-web`，并说明在网页点选项 |
-| A8 | 可选 | `bash scripts/e2e-smoke.sh` 冒烟；`bash scripts/sync-skills.sh` |
-
-**禁止**：替用户点 MCP 设置；Solo Web 下用 AskQuestion 代替网页按钮。
-
----
-
-## 完整上手指南
-
-### 1. 项目在做什么
-
-| 角色 | 做什么 |
-|------|--------|
-| **你** | 在 Cursor 里下指令；在 **Hub 网页**上点按钮作答 |
-| **Cursor Agent** | 通过 MCP 向 Hub **发 prompt（带选项）**，并 **check_hub** 等你点完 |
-| **Hub** | 本地 HTTP（默认 **8040**）：存会话、待答、YOLO 对齐文档 |
-| **Web** | **Agent 控制** + **YOLO** 两个页签 |
-
-多 Agent 时没有左侧 Agent 列表；每条问题卡片上的**标签**即 Agent 名称（`send_prompt` 的 `display_name` 或 `patch_agent`）。
-
-### 2. 每次启动用什么（固定参数）
-
-**每次新开 Cursor 会话或重启电脑后，按此顺序：**
-
-| 次序 | 做什么 | 用什么 |
-|:----:|--------|--------|
-| 1 | 启动 Hub | `bash scripts/start-hub.sh` → 默认 **http://127.0.0.1:8040/** |
-| 2 | 确认 MCP 已开 | Cursor **Settings → MCP** → **`hub-agent-1`** 为 ON → **Reload** |
-| 3 | 打开网页 | **Agent 控制**：http://127.0.0.1:8040/pc/prompts ；**YOLO**：http://127.0.0.1:8040/pc/yolo |
-| 4 | 进入循环 | Cursor 发送 **`/pc-os-solo-web`** |
-| 5 | Agent 连 Hub | MCP **`setup`**（每个 Cursor 会话一次；Hub 重启后必须重做） |
-
-**端口与 MCP（`.cursor/mcp.json`，由 `scripts/setup-mcp.sh` 生成）：**
-
-| 项 | 值 | 含义 |
-|----|-----|------|
-| MCP 服务名 | `hub-agent-1` | 第一个 Cursor 对话绑定这个 |
-| `HUB_PORT` | `8040` | 与 Hub 监听端口一致 |
-| `HUB_SESSION` | `1` | 槽位 1；第二个对话用 `hub-agent-2` + `HUB_SESSION=2` |
-| `PC_PROJECT_DIR` | 本仓库绝对路径 | MCP 发现 Hub、注册项目 |
-
-改端口：`PC_HUB_PORT=8041 bash scripts/start-hub.sh`，并改 `mcp.json` 里的 `HUB_PORT`。
-
-### 3. 一次会话怎么跑
-
-```mermaid
-sequenceDiagram
-  participant U as 你
-  participant C as Cursor Agent
-  participant M as mcp-server
-  participant H as Hub
-  participant W as Hub Web
-
-  U->>C: /pc-os-solo-web
-  C->>M: setup()
-  M->>H: 注册 agent
-  C->>M: send_prompt + options
-  W-->>U: 网页显示按钮
-  U->>W: 点选回答
-  C->>M: check_hub()
-  M-->>C: 带回你的选择
-```
-
-- `send_prompt` **必须带 options**；之后 **必须 check_hub**。
-- 只在 Cursor 里打字**不算**回答。
-
-### 4. Agent 控制页（日常指挥）
-
-![Agent 控制：待回答问题与选项按钮](docs/images/01-agent-control-pending.png)
-
-**图中是什么**
-
-- 顶栏 **Agent 控制 | YOLO**：日常问答用前者；极限目标对齐用后者。
-- **待回答**：Agent 通过 MCP `send_prompt` 推来的问题；数字为条数。
-- **卡片标签**（如 `文档演示:Agent控制`）：Agent 显示名；多对话时靠它区分（无左侧 Agent 栏）。
-- **选项按钮**：`send_prompt` 里的 `options`；可多选 + 底部文字，**⌘+Enter 发送**。
-- **History**（右侧）：已回答记录；拖拽竖线可调宽度。
-
-**你怎么操作**
-
-1. 已完成 `/pc-os-solo-web`，且 Agent 跑过 **`setup`**。
-2. Agent `send_prompt` 后，**只在本页点按钮或发送**。
-3. Agent 会 `check_hub` 阻塞到你点完。
-
----
-
-### 5. 多 Agent 时如何区分
-
-![Agent 控制：多 Agent 靠卡片标签区分](docs/images/03-agent-control-multi.png)
-
-**含义**：每个 Cursor 窗口对应一个 `hub-agent-N`。发问时带上名称，例如 MCP：
-
-`send_prompt(..., display_name="前端:登录页")`
-
-名称会显示在问题卡片左上角，无需维护 Agent 列表。
-
----
-
-### 6. YOLO 怎么用
-
-**流程（全自动前必须先对齐）：**
-
-| 步骤 | 谁 | 做什么 |
-|:----:|-----|--------|
-| 1 | Agent | `pc-os-yolo-confirm`：写极限目标 + 7 段对齐文档 |
-| 2 | 你 | 打开 **YOLO** 页，审阅、修改、逐段确认 |
-| 3 | 你 | 点 **批准 / 开始执行** |
-| 4 | Agent | `pc-os-yolo-execute`：按对齐文档实施；进度仍通过 **Agent 控制** 页 `send_prompt` 汇报 |
-
-![YOLO 对齐页](docs/images/02-yolo.png)
-
-**图中是什么**
-
-- 页顶可输入**极限目标**（需有在线 Agent 时由 Hub 转发给 Agent）。
-- **Pending**：待你审批的对齐稿。
-- **History**：已批准或已完成的对齐记录。
-
-**注意**：YOLO 不负责日常问答；执行阶段的请示仍出现在 **Agent 控制** 页。
-
----
-
-### 7. MCP 工具
-
-| 工具 | 何时 | 作用 |
-|------|------|------|
-| `setup` | 每会话开始 / Hub 重启后 | 连 Hub、注册 `agent_id` |
-| `send_prompt` | 要问用户 | 问题 + **options**；可选 **display_name** |
-| `check_hub` | 每次 `send_prompt` 后 | 等网页作答 |
-| `patch_agent` | 改名 | 更新显示名 |
-| `hub_status` | 排错 | 端口、`agent_id` |
-
-### 8. 验收与命令
+仅克隆本仓库即可运行 Hub + Web，不依赖 Polarisor 其他子模块。
 
 ```bash
-bash scripts/e2e-smoke.sh           # API 冒烟
-bash scripts/capture-screenshots.sh # 重新截取 docs/images 里的图
+git clone https://github.com/beichenO2/PolarCopilot.git
+cd PolarCopilot
+
+# Hub 后端
+cd hub && npm install && npm start    # 默认端口 8040
+
+# Web UI（另开终端）
+cd web && npm install && npm run build
 ```
 
-| 目的 | 命令 |
+访问 `http://127.0.0.1:8040/pc/`。MCP 通道需配置 `~/.cursor/hub-mcp-server`（Polarisor 生态由 `Agent_core` 脚本写入 `.cursor/mcp.json`）。
+
+**环境要求**：Node.js ≥ 22 · npm · Cursor IDE · 可选 tmux（后台保活 Hub）
+
+---
+
+## 设计思考
+
+### 为什么用 MCP 通道，而不是 Agent 自己 curl 轮询 Hub？
+
+Cursor Agent 原生支持 MCP Tool 调用。Hub 暴露 **42 个 `hub_*` 工具**（注册、任务、租约、广播、审计等），UI 侧另有 **5 个交互工具**（`setup` / `send_prompt` / `check_hub` / `patch_agent` / `hub_status`）。Agent 在 `check_hub` 处 **进程内阻塞**，直到用户在 Web 点选——语义清晰，无需自建轮询循环与超时状态机。
+
+### 为什么用 Hub 事件代理，而不是 Agent 直连？
+
+Agent 之间 **不直接通信**。所有 pub/sub、任务队列、YOLO 对齐、SoTADiff 审计经 Hub 路由，便于统一追踪、换人和故障隔离。100+ CLI Agent 集群（gsd-2 架构）同样依赖这一层，而不是 P2P WebSocket mesh。
+
+### 为什么用 SSE 推送 + 15s 兜底轮询，而不是纯轮询？
+
+Web UI 通过 **Server-Sent Events** 接收 Prompt、Agent 状态、SSoT 变更；仅在 SSE 不可用时以 **15s 间隔** 兜底刷新（YOLO / Evolution / 检修页）。相比 2s HTTP 长轮询，UI 延迟更低、Hub 负载更小。
+
+### 为什么 YOLO 必须先对齐，而不是直接全自动？
+
+全自动执行前须完成 **三维对齐文档**（极限目标 + 7 段结构）并在 Web **逐段审批**。未批准前 Hub 拒绝进入 execute 阶段——避免「Agent 自信跑完、方向全错」的不可逆浪费。
+
+---
+
+## 核心亮点
+
+| 维度 | 数据 |
 |------|------|
-| 首次安装 | `npm run setup` |
-| 启动 Hub | `bash scripts/start-hub.sh` |
-| 停止 Hub | `tmux kill-session -t pc-os-hub` |
+| **Hub Agent 槽位** | **20** 路 MCP 通道（`hub-agent-1` … `hub-agent-20`），每路绑定独立 Cursor 对话 |
+| **Hub MCP 工具** | **42** 个 `hub_*` 协议工具 + **5** 个 UI 交互工具 |
+| **Web 页面** | **9** 个主导航页 + Checkup Widget；路由覆盖 Dashboard / Agent 控制 / SSoT / Prolusion / YOLO / Pilot / Evolution / Start Agent / 检修历史 |
+| **实时通信** | MCP Streamable HTTP + SSE；轮询仅 **15s** 兜底 |
+| **持久化** | SQLite（Drizzle ORM），单 Hub 进程，无 Redis 依赖 |
+| **进化基因库** | **10** 条种子基因（repair / optimize / governance），**6** 阶段进化流水线（E1–E6） |
+| **Prolusion 规划** | **4** 阶段结构化编译（需求 → 方案 → 任务包 → 验收） |
+| **测试** | Hub **74+** 合约测试（polaris.json 记录）；Vitest 覆盖 e2e / integration / protocol |
+| **Hub 版本** | `0.5.1` · Node **≥ 22** · 默认端口 **8040** |
 
 ---
 
-## 你会得到什么
+## 页面预览
 
-| 组件 | 目录 | 作用 |
-|------|------|------|
-| **Hub** | `hub/` | 本地 HTTP + SQLite |
-| **Web** | `web/` | Agent 控制 + YOLO |
-| **MCP** | `mcp-server/` | Cursor 桥 |
+> 截图位于 `screenshots/`。用 Cursor **Open Folder** 打开本仓库根目录预览 Markdown 图片。
 
-历史栏拖拽：[docs/HISTORY_PANEL.md](docs/HISTORY_PANEL.md)
+| Dashboard | Agent 控制 |
+|:---:|:---:|
+| ![Dashboard](screenshots/pc-01-dashboard.png) | ![Agent Control](screenshots/pc-02-prompts.png) |
 
----
+| YOLO 对齐 | 进化循环 |
+|:---:|:---:|
+| ![YOLO](screenshots/pc-03-yolo.png) | ![Evolution](screenshots/pc-04-evolution.png) |
 
-## 前置条件
+| SSoT 管理 | Pilot 状态 |
+|:---:|:---:|
+| ![SSoT](screenshots/pc-05-ssot.png) | ![Pilot](screenshots/pc-06-pilot.png) |
 
-Node.js（建议 ≥22）、npm、Cursor；可选 tmux。
+| Prolusion 规划 | 检修历史 |
+|:---:|:---:|
+| ![Prolusion](screenshots/pc-07-prolusion.png) | ![Checkup](screenshots/pc-08-checkup.png) |
+
+| Hub 总览 | Agent 启动器 |
+|:---:|:---:|
+| ![Hub](screenshots/polarcop-hub.png) | ![Start Agent](screenshots/polarcop-start-agent.png) |
 
 ---
 
 ## 架构
 
 ```
-你（浏览器） ←→ Hub Web（/pc/prompts、/pc/yolo）
-                    ↑
-Cursor Agent ←MCP→ mcp-server ←HTTP→ hub :8040
+PolarCopilot/
+├── hub/                    # MCP Hub 后端（Express 5 + SQLite + Drizzle）
+│   ├── src/
+│   │   ├── transport/      # MCP Streamable HTTP + REST API
+│   │   ├── broadcast/      # SSE 推送
+│   │   ├── session/        # Agent 注册与心跳
+│   │   ├── tasks/          # 任务队列、租约、亲和性
+│   │   ├── evolution/      # 进化基因与执行器
+│   │   ├── questions/      # 阻塞式问答
+│   │   ├── checkup/        # 检修事件路由
+│   │   ├── pilot/          # PolarClaw Pilot API 代理
+│   │   ├── protocol/       # MCP 工具 schema（tasks/leases/safety/…）
+│   │   └── persistence/    # SQLite store
+│   ├── static/             # Checkup Widget 构建产物
+│   ├── knowledge/          # 架构与设计参考文档
+│   └── tests/              # Vitest（e2e / integration / contract）
+├── web/                    # React 18 SPA（Vite 6 + Tailwind 3）
+│   └── src/pages/          # Dashboard · Prompts · SSoT · YOLO · …
+├── polarcop-vscode/        # VS Code / Cursor 侧边栏插件（可选入口）
+├── polaris.json            # 项目 SSoT（需求、功能、接口）
+├── PolarSoul.md            # 设计灵魂与决策记录
+└── screenshots/            # README 预览图
 ```
 
----
+**数据流**：
 
-## Skills（`pc-os-*`）
+```
+你（浏览器） ←SSE/REST→ Hub Web（/pc/*）
+                           ↑
+Cursor Agent ←MCP→ ~/.cursor/hub-mcp-server ←HTTP→ hub :8040
+     ×20 槽位（hub-agent-1 … 20）
+```
 
-| Skill | 用途 |
-|-------|------|
-| `pc-os-start` | 按 README 部署 |
-| `pc-os-solo-web` | 网页控制循环 |
-| `pc-os-yolo-confirm` | 写对齐文档 |
-| `pc-os-yolo-execute` | 审批后实施 |
-
----
-
-## 环境变量
-
-| 变量 | 默认 |
-|------|------|
-| `PC_HUB_PORT` | `8040` |
-| `PC_PROJECT_DIR` | 仓库根 |
-| `HUB_SESSION` | `1` |
+与 **PolarCopilot_Opensource** 的区别：开源精简版含独立 `mcp-server/` 与 `pc-os-*` Skills，Web 仅 **Agent 控制 + YOLO** 两页；本仓库为 **Polarisor 全功能版**，含 SSoT、Prolusion、Evolution、Pilot 代理、Checkup、VSCode 插件等。
 
 ---
 
-## 常见问题
+## 快速开始
 
-### 预览里图不显示（Cursor 特有）
+```bash
+# 1. 构建 Web（Hub 在同一端口 serve /pc/ 静态资源）
+cd web && npm install && npm run build
 
-**不是你的 Markdown 写错了。** 标准写法 `![说明](docs/images/xxx.png)` 在 GitHub、Typora、VS Code 侧栏预览里都能显示。
+# 2. 启动 Hub
+cd ../hub && npm install && npm start
+# 或 Polarisor 生态：bash Agent_core/scripts/solo-web-startup.sh 1
 
-Cursor 右上角 **Preview / Markdown 切换按钮** 用的是**另一套渲染器**，目前**不渲染本地图片**（社区已知问题）。你可以：
+# 3. 健康检查
+curl -s http://127.0.0.1:8040/api/ui/health   # 应含 "ok"
 
-| 方式 | 操作 | 是否显示本地图 |
-|------|------|----------------|
-| **推荐** | `Cmd+Shift+V`（**Open Preview to the Side**） | ✓ |
-| **推荐** | 用 **Open Folder** 打开本仓库根目录；项目已含 `.vscode/settings.json` 默认用 VS Code 预览器打开 `.md` | ✓ |
-| 不推荐 | 编辑器右上角 **Preview** 切换 | ✗（本地图常空白） |
+# 4. 同步 Cursor Skills（Polarisor 生态）
+cd hub && npm run sync-skills
+```
 
-另请确认：打开的是 **本仓库根目录**（与 `docs/images` 同级），不要只打开上级文件夹，否则相对路径也解析不到。
+**典型工作流**：
 
-**MCP 连不上** — Hub 是否启动；`HUB_PORT`、`PC_PROJECT_DIR` 是否正确。
+1. Cursor 发送 `$pc-solo-web` → Agent 调用 MCP `setup()` 注册 Hub  
+2. Agent `send_prompt` 推送带选项的问题 → Web **Agent 控制**页显示按钮  
+3. 你在浏览器点选 → Agent `check_hub` 取回答案 → 继续执行  
+4. 极限目标：先 `$pc-yolo-confirm` 写对齐稿 → **YOLO** 页审批 → `$pc-yolo-execute` 实施  
 
-**网页空白** — `npm run build:web` 后重启 Hub。
+**常用 URL**（默认端口 8040）：
+
+| 页面 | URL |
+|------|-----|
+| Dashboard | http://127.0.0.1:8040/pc/ |
+| Agent 控制 | http://127.0.0.1:8040/pc/prompts |
+| YOLO | http://127.0.0.1:8040/pc/yolo |
+| SSoT | http://127.0.0.1:8040/pc/ssot |
+| Evolution | http://127.0.0.1:8040/pc/evolution |
 
 ---
 
-## 许可证
+## 生态依赖
 
-本项目采用 **[MIT License](LICENSE)**（允许商用，但必须署名）：
+| 项目 | 角色 | 是否必须 |
+|------|------|----------|
+| [Agent_core](https://github.com/beichenO2/Agent_core) | 协议（PROTOCOLS.md）、`pc-*` Skills、`solo-web-startup.sh` | **必须**（全功能模式） |
+| [SOTAgent](https://github.com/beichenO2/SOTAgent) / PolarPort | 端口分配与服务发现（`polarcop-hub` @ 8040） | 推荐 |
+| [PolarClaw](https://github.com/beichenO2/PolarClaw) | LLM 代理；Pilot 页代理其 `/api/pilot/*` | 推荐（Pilot / LLM 能力） |
+| [PolarPrivate](https://github.com/beichenO2/PolarPrivate) | 密钥不出边界 | 可选 |
 
-| 权利 | 说明 |
-|------|------|
-| **商用** | 可用于个人或商业产品，无需另行授权 |
-| **署名** | 再分发、修改或嵌入时，须在副本中保留**版权声明**与 **MIT 许可全文** |
-| **无担保** | 软件按「原样」提供，作者不承担法律责任 |
+---
 
-Copyright © 2026 [beichenO2](https://github.com/beichenO2)
+## 延伸阅读
+
+- 设计灵魂：[PolarSoul.md](PolarSoul.md)
+- Hub 架构（100+ Agent 集群）：[hub/ARCHITECTURE.md](hub/ARCHITECTURE.md)
+- Copilot vs Pilot 关系：[hub/knowledge/ref-copilot-pilot-architecture.md](hub/knowledge/ref-copilot-pilot-architecture.md)
+- API 规格：[hub/docs/api-spec.md](hub/docs/api-spec.md)
+
+---
+
+## License
+
+MIT License — Copyright © 2026 [beichenO2](https://github.com/beichenO2)
+
+允许商用与修改，再分发须保留版权声明与许可全文。
