@@ -420,43 +420,11 @@ export const api = {
   },
 
   uploads: {
-    upload: async (
-      items: { file: File; relPath: string }[],
-    ): Promise<{
-      ok: boolean
-      dir: string
-      roots: { name: string; path: string; isDir: boolean }[]
-      files: { path: string; size: number }[]
-    }> => {
+    upload: async (files: File[]): Promise<{ ok: boolean; files: { original_name: string; path: string; size: number }[] }> => {
       const form = new FormData()
-      const paths: string[] = []
-      // Stream the raw File objects (memory-safe for large folders — the browser
-      // streams them from disk during the request). Browsers strip the directory
-      // from multipart filenames, so each file's relative path travels in `paths`,
-      // letting the server rebuild a dragged folder's structure.
-      for (const { file, relPath } of items) {
-        form.append('files', file, relPath.split('/').pop() || file.name)
-        paths.push(relPath)
-      }
-      form.append('paths', JSON.stringify(paths))
-      let res: Response
-      try {
-        res = await fetch(`${BASE}/api/ui/uploads`, { method: 'POST', body: form })
-      } catch (e) {
-        console.error('uploads.upload fetch failed:', e)
-        throw new Error(
-          '上传请求被浏览器拦截（net::ERR_ACCESS_DENIED / Failed to fetch）。'
-          + '请点 📎 用系统选择器选文件，或到「系统设置 → 隐私与安全性 → 文件与文件夹」给 Chrome 重新授权后重启浏览器（也可改用 Safari/Edge）。',
-        )
-      }
-      if (!res.ok) {
-        let detail = ''
-        try {
-          const j = await res.json() as { detail?: string }
-          if (j?.detail) detail = `：${j.detail}`
-        } catch { /* non-JSON body */ }
-        throw new Error(`上传失败（HTTP ${res.status}）${detail}`)
-      }
+      for (const f of files) form.append('files', f)
+      const res = await fetch(`${BASE}/api/ui/uploads`, { method: 'POST', body: form })
+      if (!res.ok) throw new Error(`Upload failed: ${res.status}`)
       return res.json()
     },
   },

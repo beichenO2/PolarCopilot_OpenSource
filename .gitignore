@@ -38,6 +38,13 @@ build/
 out/
 *.tsbuildinfo
 
+# Coverage & test output
+coverage/
+.nyc_output/
+
+# Vendored / upstream third-party copies (large, not ours)
+*-upstream/
+
 # IDE & OS
 .DS_Store
 Thumbs.db

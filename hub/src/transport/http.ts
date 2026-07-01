@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
-import { existsSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
-import { join, extname, resolve, dirname } from 'node:path';
+import { join, extname } from 'node:path';
 import express, { type Express, type RequestHandler } from 'express';
 import multer from 'multer';
 import * as z from 'zod/v4';
@@ -3142,32 +3142,19 @@ function mountUiRoutes(app: Express, db: HubDb, ctx: HubContext, publisher?: Bro
     }
   });
 
-  // ── File uploads: drag-to-reference in PromptCard (files & folders) ──
+  // ── File uploads: drag-to-reference in PromptCard ──
   const uploadsDir = join(process.cwd(), '.planning/hub/uploads');
   mkdirSync(uploadsDir, { recursive: true });
-
-  // Drop empty/./.. segments and strip control / fs-illegal chars — blocks path
-  // traversal while keeping readable (Unicode) names. Input is expected UTF-8.
-  const safeRelPath = (raw: string): string =>
-    raw
-      .split(/[\\/]+/)
-      .map(s => s.trim())
-      .filter(s => s && s !== '.' && s !== '..')
-      .map(s => s.replace(/[\u0000-\u001f<>:"|?*]/g, '_'))
-      .join('/');
-
-  // Browsers (and curl) strip directory components from multipart filenames, so the
-  // client sends a parallel `paths` JSON array (one relative path per file, same
-  // order) to rebuild a dragged folder's structure. Stream each file to a temp dir
-  // (memory-safe for large folders), then move it into the structured batch dir.
-  const tmpUploadsDir = join(uploadsDir, '.tmp');
-  mkdirSync(tmpUploadsDir, { recursive: true });
   const upload = multer({
     storage: multer.diskStorage({
-      destination: (_req, _file, cb) => cb(null, tmpUploadsDir),
-      filename: (_req, _file, cb) => cb(null, `${Date.now()}-${randomUUID()}`),
+      destination: (_req, _file, cb) => cb(null, uploadsDir),
+      filename: (_req, file, cb) => {
+        const ext = extname(file.originalname);
+        const base = file.originalname.replace(ext, '').replace(/[^a-zA-Z0-9_\-.]/g, '_');
+        cb(null, `${Date.now()}-${base}${ext}`);
+      },
     }),
-    limits: { fileSize: 2 * 1024 * 1024 * 1024 }, // 2 GB / file
+    limits: { fileSize: 50 * 1024 * 1024 },
   });
 
   // CORS preflight for file uploads (Chrome Private Network Access sends OPTIONS first)
@@ -3179,64 +3166,25 @@ function mountUiRoutes(app: Express, db: HubDb, ctx: HubContext, publisher?: Bro
     res.status(204).end();
   });
 
-  app.post('/api/ui/uploads', (req, res) => {
-    upload.array('files', 5000)(req, res, (mErr: unknown) => {
+  app.post('/api/ui/uploads', upload.array('files', 10), (req, res) => {
+    try {
       res.setHeader('Access-Control-Allow-Origin', req.headers.origin ?? '*');
       res.setHeader('Access-Control-Allow-Private-Network', 'true');
-      if (mErr) {
-        const detail = mErr instanceof multer.MulterError
-          ? `${mErr.code}: ${mErr.message}`
-          : String((mErr as Error)?.message ?? mErr);
-        ctx.logger.warn({ err: mErr }, 'upload rejected by multer');
-        res.status(413).json({ error: 'upload_failed', detail });
+      const files = req.files as Express.Multer.File[] | undefined;
+      if (!files || files.length === 0) {
+        res.status(400).json({ error: 'no files provided' });
         return;
       }
-      try {
-        const files = req.files as Express.Multer.File[] | undefined;
-        if (!files || files.length === 0) {
-          res.status(400).json({ error: 'no files provided' });
-          return;
-        }
-        let relPaths: string[] = [];
-        try {
-          const raw = (req.body as { paths?: string })?.paths;
-          if (raw) relPaths = JSON.parse(raw) as string[];
-        } catch { /* fall back to per-file originalname */ }
-
-        const stamp = String(Date.now());
-        const batchRoot = resolve(uploadsDir, stamp);
-        const written: { path: string; size: number }[] = [];
-        files.forEach((f, i) => {
-          // relPaths come from a JSON field (already UTF-8); originalname is latin1.
-          const candidate = relPaths[i] ?? Buffer.from(f.originalname, 'latin1').toString('utf8');
-          const rel = safeRelPath(candidate) || `file-${i}${extname(f.originalname)}`;
-          const dest = resolve(batchRoot, rel);
-          if (dest !== batchRoot && !dest.startsWith(batchRoot + '/')) {
-            try { rmSync(f.path, { force: true }); } catch { /* ignore */ }
-            return; // traversal guard
-          }
-          mkdirSync(dirname(dest), { recursive: true });
-          renameSync(f.path, dest); // move temp → structured (same fs, atomic)
-          written.push({ path: dest, size: f.size });
-        });
-
-        // Top-level entries of this drop: a dropped file → that file; a dropped
-        // folder → the folder dir. Reported from disk so names match exactly.
-        let roots: { name: string; path: string; isDir: boolean }[] = [];
-        try {
-          roots = readdirSync(batchRoot, { withFileTypes: true }).map(e => ({
-            name: e.name,
-            path: join(batchRoot, e.name),
-            isDir: e.isDirectory(),
-          }));
-        } catch { /* ignore */ }
-
-        res.json({ ok: true, dir: batchRoot, roots, files: written });
-      } catch (err) {
-        ctx.logger.error({ err }, 'file upload error');
-        res.status(500).json({ error: 'upload failed' });
-      }
-    });
+      const results = files.map(f => ({
+        original_name: f.originalname,
+        path: f.path,
+        size: f.size,
+      }));
+      res.json({ ok: true, files: results });
+    } catch (err) {
+      ctx.logger.error({ err }, 'file upload error');
+      res.status(500).json({ error: 'upload failed' });
+    }
   });
 
   app.get('/api/ui/health', async (_req, res) => {

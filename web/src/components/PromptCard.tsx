@@ -36,58 +36,6 @@ function insertTextAtCursor(textarea: HTMLTextAreaElement, text: string): string
   return before + insert + after
 }
 
-type UploadItem = { file: File; relPath: string }
-
-function readEntryFile(entry: FileSystemFileEntry): Promise<File> {
-  return new Promise((resolve, reject) => entry.file(resolve, reject))
-}
-
-// readEntries returns at most ~100 entries per call, so drain until empty.
-function readAllDirEntries(reader: FileSystemDirectoryReader): Promise<FileSystemEntry[]> {
-  return new Promise((resolve, reject) => {
-    const all: FileSystemEntry[] = []
-    const next = () =>
-      reader.readEntries((batch) => {
-        if (batch.length === 0) { resolve(all); return }
-        all.push(...batch)
-        next()
-      }, reject)
-    next()
-  })
-}
-
-async function walkEntry(entry: FileSystemEntry, prefix: string, out: UploadItem[]): Promise<void> {
-  if (entry.isFile) {
-    const file = await readEntryFile(entry as FileSystemFileEntry)
-    out.push({ file, relPath: prefix + entry.name })
-  } else if (entry.isDirectory) {
-    const children = await readAllDirEntries((entry as FileSystemDirectoryEntry).createReader())
-    for (const child of children) await walkEntry(child, `${prefix}${entry.name}/`, out)
-  }
-}
-
-// Expand a drop into upload items. Uses webkitGetAsEntry to recurse into folders;
-// falls back to the flat file list when the entries API is unavailable.
-async function collectUploadItems(entries: FileSystemEntry[], flatFiles: File[]): Promise<UploadItem[]> {
-  if (entries.length > 0) {
-    const out: UploadItem[] = []
-    for (const e of entries) await walkEntry(e, '', out)
-    return out
-  }
-  return flatFiles.map((f) => ({ file: f, relPath: f.name }))
-}
-
-// Convert a pasted absolute path / file:// URI into an @reference. Lets the user
-// paste a path (e.g. Finder ⌥⌘C "Copy as Pathname") to reference a local folder
-// without uploading — browsers don't expose dragged-folder paths for security.
-function pastedPathToRef(line: string): string | null {
-  if (line.startsWith('file://')) {
-    try { return `@${decodeURIComponent(new URL(line).pathname)}` } catch { return null }
-  }
-  if (line.startsWith('/')) return `@${line}`
-  return null
-}
-
 export function PromptCard({ prompt, onAnswer, onDismiss, isHistory, linkedPromptId, savedDraft, savedHeight, onDraftChange, onHeightChange, onAnnotationsConsumed, onDragStartPrompt }: Props) {
   const [customInput, setCustomInput] = useState(savedDraft ?? '')
   const [isComposing, setIsComposing] = useState(false)
@@ -98,12 +46,10 @@ export function PromptCard({ prompt, onAnswer, onDismiss, isHistory, linkedPromp
   const [popoverPos, setPopoverPos] = useState<{ top: number; left: number }>({ top: 0, left: 0 })
   const [fileDragOver, setFileDragOver] = useState(false)
   const [uploadingFiles, setUploadingFiles] = useState(false)
-  const [uploadError, setUploadError] = useState<string | null>(null)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const annTextareaRef = useRef<HTMLTextAreaElement>(null)
   const contentRef = useRef<HTMLDivElement>(null)
   const cardRef = useRef<HTMLDivElement>(null)
-  const fileInputRef = useRef<HTMLInputElement>(null)
 
   const agentLabel = prompt.display_name || prompt.agent_id || 'System'
   const isPending = !prompt.answered && !isHistory
@@ -150,37 +96,6 @@ export function PromptCard({ prompt, onAnswer, onDismiss, isHistory, linkedPromp
       buildAndSend()
     }
   }
-
-  const insertRefsText = useCallback((refs: string) => {
-    if (!refs) return
-    if (textareaRef.current) {
-      const newVal = insertTextAtCursor(textareaRef.current, refs)
-      setCustomInput(newVal)
-      onDraftChange?.(newVal)
-    } else {
-      setCustomInput(prev => {
-        const newVal = prev + (prev ? ' ' : '') + refs
-        onDraftChange?.(newVal)
-        return newVal
-      })
-    }
-  }, [onDraftChange])
-
-  const doUpload = useCallback(async (items: UploadItem[]) => {
-    if (items.length === 0) return
-    setUploadingFiles(true)
-    setUploadError(null)
-    try {
-      const result = await api.uploads.upload(items)
-      // One ref per top-level dropped entry: a file → the file, a folder → the folder.
-      insertRefsText((result.roots ?? []).map(r => `@${r.path}`).join(' '))
-    } catch (err) {
-      console.error('File upload failed:', err)
-      setUploadError(err instanceof Error ? err.message : '上传失败，请重试')
-    } finally {
-      setUploadingFiles(false)
-    }
-  }, [insertRefsText])
 
   const hasSendContent = customInput.trim().length > 0 || selectedOptions.size > 0 || annotations.length > 0
 
@@ -554,7 +469,6 @@ export function PromptCard({ prompt, onAnswer, onDismiss, isHistory, linkedPromp
 
       {/* Unified input + send */}
       {isPending && (
-        <>
         <div className="flex gap-2 items-end mt-1">
           <div
             className={clsx('flex-1 relative', fileDragOver && 'ring-2 ring-blue-400/50 rounded-lg')}
@@ -566,24 +480,32 @@ export function PromptCard({ prompt, onAnswer, onDismiss, isHistory, linkedPromp
               }
             }}
             onDragLeave={() => setFileDragOver(false)}
-            onDrop={(e) => {
+            onDrop={async (e) => {
               e.preventDefault()
               e.stopPropagation()
               setFileDragOver(false)
-              // webkitGetAsEntry is only valid synchronously during the drop event.
-              const entries = e.dataTransfer.items
-                ? Array.from(e.dataTransfer.items)
-                    .map(it => it.webkitGetAsEntry?.() ?? null)
-                    .filter((x): x is FileSystemEntry => x !== null)
-                : []
-              if (entries.some(en => en.isDirectory)) {
-                // Browsers can't expose a dragged folder's local path, and copying
-                // the whole tree is slow. Guide the user to paste the path instead.
-                setUploadError('拖入文件夹无法获取本地路径（浏览器安全限制）。请在访达选中该文件夹按 ⌥⌘C「拷贝为路径名」，再粘贴到输入框——会自动转成 @ 引用，无需上传。')
-                return
+              const files = Array.from(e.dataTransfer.files)
+              if (files.length === 0) return
+              setUploadingFiles(true)
+              try {
+                const result = await api.uploads.upload(files)
+                if (result.ok && result.files.length > 0) {
+                  const refs = result.files.map(f => `@${f.path}`).join(' ')
+                  if (textareaRef.current) {
+                    const newVal = insertTextAtCursor(textareaRef.current, refs)
+                    setCustomInput(newVal)
+                    onDraftChange?.(newVal)
+                  } else {
+                    const newVal = customInput + (customInput ? ' ' : '') + refs
+                    setCustomInput(newVal)
+                    onDraftChange?.(newVal)
+                  }
+                }
+              } catch (err) {
+                console.error('File upload failed:', err)
+              } finally {
+                setUploadingFiles(false)
               }
-              const flatFiles = Array.from(e.dataTransfer.files)
-              collectUploadItems(entries, flatFiles).then(doUpload)
             }}
           >
             <textarea
@@ -593,19 +515,7 @@ export function PromptCard({ prompt, onAnswer, onDismiss, isHistory, linkedPromp
               onKeyDown={handleKeyDown}
               onCompositionStart={() => setIsComposing(true)}
               onCompositionEnd={() => setIsComposing(false)}
-              onPaste={(e) => {
-                const text = e.clipboardData.getData('text/plain')
-                if (!text) return
-                const lines = text.split(/\r?\n/).map(s => s.trim()).filter(Boolean)
-                const refs = lines.map(pastedPathToRef)
-                // Only intercept when every pasted line is an absolute path / file:// URI.
-                if (lines.length > 0 && refs.every((r): r is string => r !== null)) {
-                  e.preventDefault()
-                  setUploadError(null)
-                  insertRefsText(refs.join(' '))
-                }
-              }}
-              placeholder={uploadingFiles ? '上传中...' : '输入回复... (⌘/Ctrl+Enter 发送; 拖文件/📎 上传; 文件夹用 ⌥⌘C 拷贝路径后粘贴)'}
+              placeholder={uploadingFiles ? '上传中...' : '输入回复... (⌘/Ctrl+Enter 发送, Enter 换行, 拖入文件引用)'}
               rows={2}
               disabled={uploadingFiles}
               className="w-full bg-hub-bg border border-hub-border rounded-lg px-3 py-2.5 text-[0.9rem] text-hub-text placeholder:text-hub-text-muted max-h-[500px] font-inherit leading-[1.5] focus:outline-none focus:border-hub-accent transition-[border-color] resize-none"
@@ -616,27 +526,6 @@ export function PromptCard({ prompt, onAnswer, onDismiss, isHistory, linkedPromp
               </div>
             )}
           </div>
-          <input
-            ref={fileInputRef}
-            type="file"
-            multiple
-            className="hidden"
-            onChange={(e) => {
-              const files = Array.from(e.target.files ?? [])
-              doUpload(files.map(f => ({ file: f, relPath: f.name })))
-              e.target.value = ''
-            }}
-          />
-          <button
-            type="button"
-            onClick={() => fileInputRef.current?.click()}
-            disabled={uploadingFiles}
-            title="选择文件上传（拖拽被系统拦截时用这个）"
-            aria-label="附件"
-            className="px-3 py-2.5 text-[1rem] leading-none rounded-lg border border-hub-border bg-hub-bg text-hub-text-muted whitespace-nowrap hover:text-hub-text hover:border-hub-accent disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
-          >
-            📎
-          </button>
           <button
             onClick={buildAndSend}
             disabled={!hasSendContent || uploadingFiles}
@@ -645,19 +534,6 @@ export function PromptCard({ prompt, onAnswer, onDismiss, isHistory, linkedPromp
             发送
           </button>
         </div>
-        {uploadError && (
-          <div className="mt-1.5 flex items-start gap-2 text-[0.8rem] text-red-300 bg-red-500/10 border border-red-400/30 rounded-lg px-3 py-2">
-            <span className="flex-1 leading-[1.5]">{uploadError}</span>
-            <button
-              onClick={() => setUploadError(null)}
-              className="text-red-300/70 hover:text-red-200 shrink-0"
-              aria-label="关闭"
-            >
-              ✕
-            </button>
-          </div>
-        )}
-        </>
       )}
 
       {/* History: collapsible full answer */}
