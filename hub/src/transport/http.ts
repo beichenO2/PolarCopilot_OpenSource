@@ -3429,7 +3429,7 @@ function mountUiRoutes(app: Express, db: HubDb, ctx: HubContext, publisher?: Bro
       res.json({
         ok: true,
         agent_id: agentId,
-        hub_port: process.env.PC_HUB_PORT || 8765,
+        hub_port: process.env.PC_HUB_PORT || 8040,
       });
     } catch (err) {
       ctx.logger.error({ err }, 'agent register error');
@@ -3588,7 +3588,7 @@ function mountUiRoutes(app: Express, db: HubDb, ctx: HubContext, publisher?: Bro
 
       const now = Date.now();
       const agentId = `${agent_type}-${now}`;
-      const hubPort = process.env.PC_HUB_PORT || 8765;
+      const hubPort = process.env.PC_HUB_PORT || 8040;
 
       // 确定项目路径
       const projectPath = agent_type === 'polarclaw'
@@ -5700,7 +5700,7 @@ async function checkAllServices(_ctx: HubContext): Promise<ServiceStatus[]> {
   const services = [
     { name: 'SOTAgent', healthUrl: `http://127.0.0.1:${SOTAGENT_API_PORT}/api/status`, consoleUrl: `http://localhost:${SOTAGENT_CONSOLE_PORT}` },
     { name: 'PolarPrivate', healthUrl: `http://127.0.0.1:${PP_API_PORT}/health`, consoleUrl: `http://localhost:${PP_CONSOLE_PORT}` },
-    { name: 'PolarCopilot Hub', healthUrl: `http://127.0.0.1:${process.env.PC_HUB_PORT ?? 8765}/api/ui/prompts`, consoleUrl: '/pc/' },
+    { name: 'PolarCopilot Hub', healthUrl: `http://127.0.0.1:${process.env.PC_HUB_PORT ?? 8040}/api/ui/prompts`, consoleUrl: '/pc/' },
   ];
   return Promise.all(services.map((s) => probeService(s.name, s.healthUrl, s.consoleUrl)));
 }

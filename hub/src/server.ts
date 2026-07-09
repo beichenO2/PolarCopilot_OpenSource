@@ -79,7 +79,7 @@ mountStreamableHttpHub(app, {
 const portFilePath = join(dirname(dbPath), 'last-port');
 let savedPort: number | undefined;
 try { savedPort = Number(readFileSync(portFilePath, 'utf-8').trim()); } catch { /* no saved port */ }
-const preferred = Number(process.env.PC_HUB_PORT ?? process.env.PORT ?? savedPort ?? 8765);
+const preferred = Number(process.env.PC_HUB_PORT ?? process.env.PORT ?? savedPort ?? 8040);
 const host = process.env.PC_HUB_HOST ?? '127.0.0.1';
 
 const { createRequire } = await import('node:module');

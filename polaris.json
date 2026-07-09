@@ -1359,7 +1359,7 @@
     "start_command": "npm run dev",
     "restart_command": "npm run dev",
     "health_endpoint": "http://127.0.0.1:8040/api/ui/prompts",
-    "notes": "Hub 端口通过 PolarPort SDK 动态分配（env PC_HUB_PORT，preferred 8765，当前 active 8040）"
+    "notes": "Hub 端口通过 PolarPort SDK 动态分配（env PC_HUB_PORT，preferred 8040，当前 active 8040）"
   },
   "depends_on": [
     "PolarPort/sdk",
