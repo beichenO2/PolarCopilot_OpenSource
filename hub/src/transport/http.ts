@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { existsSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, statSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join, extname } from 'node:path';
 import express, { type Express, type RequestHandler } from 'express';
@@ -3184,6 +3184,44 @@ function mountUiRoutes(app: Express, db: HubDb, ctx: HubContext, publisher?: Bro
     } catch (err) {
       ctx.logger.error({ err }, 'file upload error');
       res.status(500).json({ error: 'upload failed' });
+    }
+  });
+
+  // ── Inline local image（prompt 配图哨兵 @ppppolarrrrr: 的图片服务端）──
+  // 只读、白名单扩展名、realpath 防穿越、仅 $HOME 与 /tmp 系根、20MB 上限。
+  const LOCAL_IMAGE_MIME: Record<string, string> = {
+    '.png': 'image/png',
+    '.jpg': 'image/jpeg',
+    '.jpeg': 'image/jpeg',
+    '.gif': 'image/gif',
+    '.webp': 'image/webp',
+    '.bmp': 'image/bmp',
+  };
+  const LOCAL_IMAGE_MAX_BYTES = 20 * 1024 * 1024;
+  const localImageRoots = ['/tmp', '/private/tmp', '/var/folders', '/private/var/folders', homedir()]
+    .map((p) => { try { return realpathSync(p); } catch { return p; } });
+  const underLocalImageRoot = (real: string) =>
+    localImageRoots.some((root) => real === root || real.startsWith(root.endsWith('/') ? root : `${root}/`));
+
+  app.get('/api/ui/local-image', (req, res) => {
+    try {
+      const raw = String(req.query.path ?? '').trim();
+      if (!raw.startsWith('/')) { res.status(400).json({ error: 'absolute_path_required' }); return; }
+      const mime = LOCAL_IMAGE_MIME[extname(raw).toLowerCase()];
+      if (!mime) { res.status(400).json({ error: 'unsupported_extension' }); return; }
+      if (!existsSync(raw)) { res.status(404).json({ error: 'not_found', path: raw }); return; }
+      const real = realpathSync(raw);
+      if (!underLocalImageRoot(real)) { res.status(403).json({ error: 'path_not_allowed' }); return; }
+      const st = statSync(real);
+      if (!st.isFile()) { res.status(404).json({ error: 'not_a_file' }); return; }
+      if (st.size > LOCAL_IMAGE_MAX_BYTES) { res.status(413).json({ error: 'too_large', size: st.size }); return; }
+      res.setHeader('Content-Type', mime);
+      res.setHeader('Cache-Control', 'no-store');
+      res.setHeader('X-Content-Type-Options', 'nosniff');
+      res.end(readFileSync(real));
+    } catch (err) {
+      ctx.logger.error({ err }, 'local-image error');
+      res.status(500).json({ error: 'internal' });
     }
   });
 

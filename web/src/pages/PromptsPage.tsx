@@ -1,4 +1,5 @@
 import { useEffect, useCallback, useState, useMemo, useRef, useLayoutEffect } from 'react'
+import { clsx } from 'clsx'
 import { useHubStore } from '../stores/hub'
 import { AgentCard } from '../components/AgentCard'
 import { PromptCard } from '../components/PromptCard'
@@ -8,6 +9,7 @@ import { api } from '../lib/api'
 import { renderMarkdown } from '../lib/markdown'
 import { playNotifySound, unlockAudio, isAudioLocked, requestNotificationPermission, showDesktopNotification } from '../lib/notify'
 import { useUiSse } from '../lib/useUiSse'
+import { useResizableWidth } from '../lib/useResizableWidth'
 import type { Agent, Prompt } from '../types/hub'
 
 function useScrollAnchor(anchorContainerRef: React.RefObject<HTMLElement | null>, deps: unknown[]) {
@@ -74,6 +76,10 @@ export function PromptsPage() {
   const pendingSectionRef = useRef<HTMLDivElement>(null)
 
   const { saveAnchor } = useScrollAnchor(pendingSectionRef, [pendingPrompts, historyPrompts])
+
+  // 左右侧栏拖拽调宽（localStorage 持久化，双击分隔条重置）
+  const leftPane = useResizableWidth('pc-prompts-left-w', 220, 160, 520)
+  const rightPane = useResizableWidth('pc-prompts-right-w', 320, 220, 680, true)
 
   useEffect(() => {
     requestNotificationPermission()
@@ -174,9 +180,12 @@ export function PromptsPage() {
 
 
   return (
-    <div className="flex gap-4 -mx-6 -mt-2">
+    <div className="flex -mx-6 -mt-2">
       {/* Left: Tree Panel */}
-      <aside className="w-[220px] flex-shrink-0 border-r border-hub-border px-2 py-4 max-h-[calc(100vh-80px)] overflow-y-auto sticky top-0">
+      <aside
+        style={{ width: leftPane.width }}
+        className="flex-shrink-0 px-2 py-4 max-h-[calc(100vh-80px)] overflow-y-auto sticky top-0"
+      >
           <EcoTree
             refreshKey={ecoTreeRefreshKey}
           />
@@ -285,8 +294,10 @@ export function PromptsPage() {
           <TopicsPanel mode="reference" />
         </aside>
 
+      <ResizeHandle onMouseDown={leftPane.onMouseDown} onDoubleClick={leftPane.reset} dragging={leftPane.dragging} />
+
       {/* Center: Pending Prompts */}
-      <main ref={mainScrollRef} className="flex-1 min-w-0 py-4">
+      <main ref={mainScrollRef} className="flex-1 min-w-0 py-4 px-4">
         {audioLocked && (
           <div
             onClick={handleUnlockAudio}
@@ -330,8 +341,13 @@ export function PromptsPage() {
         </section>
       </main>
 
+      <ResizeHandle onMouseDown={rightPane.onMouseDown} onDoubleClick={rightPane.reset} dragging={rightPane.dragging} />
+
       {/* Right: History Sidebar */}
-      <aside className="w-[320px] flex-shrink-0 border-l border-hub-border px-3 py-4 max-h-[calc(100vh-80px)] overflow-y-auto sticky top-0">
+      <aside
+        style={{ width: rightPane.width }}
+        className="flex-shrink-0 px-3 py-4 max-h-[calc(100vh-80px)] overflow-y-auto sticky top-0"
+      >
         <div className="flex items-center gap-3 mb-3 pb-2 border-b border-hub-border">
           <h2 className="text-sm font-semibold flex items-center gap-2">
             History
@@ -359,6 +375,33 @@ export function PromptsPage() {
           </div>
         )}
       </aside>
+    </div>
+  )
+}
+
+/* ---- Resize Handle（侧栏拖拽分隔条）---- */
+
+function ResizeHandle({ onMouseDown, onDoubleClick, dragging }: {
+  onMouseDown: (e: React.MouseEvent) => void
+  onDoubleClick: () => void
+  dragging: boolean
+}) {
+  return (
+    <div
+      onMouseDown={onMouseDown}
+      onDoubleClick={onDoubleClick}
+      title="拖拽调宽 · 双击重置"
+      className={clsx(
+        'w-[5px] flex-shrink-0 cursor-col-resize self-stretch relative group transition-colors',
+        dragging ? 'bg-hub-accent' : 'bg-hub-border hover:bg-hub-accent/60',
+      )}
+    >
+      {/* 扩大热区 */}
+      <div className="absolute inset-y-0 -left-1 -right-1" />
+      <div className={clsx(
+        'absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-1 h-8 rounded-full transition-opacity',
+        dragging ? 'bg-hub-accent opacity-100' : 'bg-hub-text-muted/40 opacity-0 group-hover:opacity-100',
+      )} />
     </div>
   )
 }

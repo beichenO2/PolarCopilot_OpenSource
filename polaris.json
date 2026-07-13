@@ -2,7 +2,7 @@
   "name": "PolarCopilot",
   "_meta": {
     "schema_version": "1.0",
-    "last_synced_at": "2026-06-10T00:00:00+08:00"
+    "last_synced_at": "2026-07-13T09:36:23+08:00"
   },
   "description": "Polarisor 的 Agent 协调基础设施。核心是 MCP Hub（Node.js/Express 后端）和 React Web UI。Hub 作为中心化事件代理，管理多个 Cursor IDE Agent 的注册、心跳、任务派发和生命周期。Web UI 主导航 10 项：Dashboard、Prompts、SSoT、Prolusion（4 阶段结构化规划）、YOLO（对齐审核）、Pilot（PolarClaw 代理）、Evolution（自进化）、Tasks（任务管理与进度）、Merge（分支合并）、Start Agent（Agent 启动器）。通信层使用 MCP Streamable HTTP 协议 + Server-Sent Events 实现零轮询实时推送。",
   "tier": "infra",
@@ -400,6 +400,63 @@
           "test_status": "passed",
           "evidence": [
             "2026-05-13: hub core contract tests 74/74 passed; web tests 13/13 passed; integration/e2e tests need MCP server (pre-existing)"
+          ]
+        },
+        {
+          "name": "Prompts 页侧边栏拖拽调宽",
+          "status": "done",
+          "tech": [
+            "React 18",
+            "localStorage"
+          ],
+          "behavior": [
+            "左（EcoTree/Agents）右（History）侧栏各有拖拽分隔条，可手动改宽",
+            "宽度 localStorage 持久化（pc-prompts-left-w / pc-prompts-right-w），双击分隔条重置默认",
+            "min/max 约束防止拖没或挤扁主栏"
+          ],
+          "test_status": "passed",
+          "evidence": [
+            "2026-07-13: web vitest 23/23（新增 markdown-image 10 例）；vite build 绿",
+            "2026-07-13: Playwright 实测拖拽 220/320→370/440，localStorage 持久化，刷新保持，双击重置回 220/320",
+            "2026-07-13: /api/ui/local-image curl 五场景（真实png 200 image/png、relative 400、/etc/passwd 400、缺失 404、路径穿越 400）；面板 E2E 双图内联渲染、非法哨兵原样文本、缺失文件裂图不崩",
+            "commits 0c4f091（拖拽）、02cbdf4（配图）；SKILL.md 配图协议已写入 pc-solo-web（.cursor 为 gitignore 目录不入库，已同步 ~/.codex 消费副本）"
+          ]
+        },
+        {
+          "name": "Prompt 配图协议（@ppppolarrrrr 哨兵）",
+          "status": "done",
+          "tech": [
+            "marked",
+            "DOMPurify",
+            "express"
+          ],
+          "interfaces": [
+            "GET /api/ui/local-image?path=<abs>"
+          ],
+          "behavior": [
+            "Agent 在 prompt 文本写（@ppppolarrrrr:/绝对路径.png）即内联显示图片；协议写入 pc-solo-web SKILL.md",
+            "前端严格校验：绝对路径 + 图片扩展名白名单才替换为 <img>，否则原样保留（不吞不炸）",
+            "后端只读图片端点：realpath 防穿越、仅 $HOME 与 /tmp 前缀、扩展名白名单、20MB 上限、404/403 明确报错"
+          ],
+          "test_status": "passed",
+          "evidence": [
+            "2026-07-13: web vitest 23/23（新增 markdown-image 10 例）；vite build 绿",
+            "2026-07-13: Playwright 实测拖拽 220/320→370/440，localStorage 持久化，刷新保持，双击重置回 220/320",
+            "2026-07-13: /api/ui/local-image curl 五场景（真实png 200 image/png、relative 400、/etc/passwd 400、缺失 404、路径穿越 400）；面板 E2E 双图内联渲染、非法哨兵原样文本、缺失文件裂图不崩",
+            "commits 0c4f091（拖拽）、02cbdf4（配图）；SKILL.md 配图协议已写入 pc-solo-web（.cursor 为 gitignore 目录不入库，已同步 ~/.codex 消费副本）"
+          ]
+        },
+        {
+          "name": "Tasks/Merge 死路由清理",
+          "status": "done",
+          "behavior": [
+            "TasksPage/MergePage 组件文件存在但从未挂载路由、零活代码引用 → 按 ClawBin 协议归档后删除",
+            "归档 ClawBin/260713-hubweb-dead-routes-tasks-merge/（含 README.txt 恢复说明）"
+          ],
+          "test_status": "passed",
+          "evidence": [
+            "2026-07-13: App.tsx 路由表核实无挂载、grep 全库零引用（main agent 复核）；vite build 73 modules 绿；vitest 23/23",
+            "commit 9b65824（rename 检测 100%，仅 +README.txt 22 行）；GitHub SSH 22 端口抖动，改走 ssh.github.com:443 推送成功"
           ]
         }
       ],
