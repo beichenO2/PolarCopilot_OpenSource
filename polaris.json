@@ -1389,6 +1389,39 @@
         }
       ],
       "blockers": []
+    },
+    {
+      "id": "R9",
+      "need": "运行时端口与进程统一治理",
+      "approach": "沿用 polarcop-hub 与 polarcop-web-dev 服务 ID，以 PolarPort 作为唯一端口权威、PolarProcess 作为唯一生命周期权威；两服务通过前台 launcher 启动并原位注册，迁移期间不重启正在运行的 Hub",
+      "features": [
+        {
+          "name": "runtime_governance",
+          "status": "done",
+          "tech": [
+            "PolarPort",
+            "PolarProcess",
+            "Bash"
+          ],
+          "behavior": [
+            "polarcop-hub 仅由 PolarProcess 管理并通过 PolarPort 申请 preferred port 8040",
+            "polarcop-web-dev 仅由 PolarProcess 管理并通过 PolarPort 申请 preferred port 5180",
+            "两个 launcher 均以前台 exec 运行，不使用 nohup、后台符号、PID 文件或直接信号",
+            "Hub 不再查询 SOTAgent 端口 API，PolarPort claim 失败时禁止环境变量绕过",
+            "迁移注册保持 Hub 当前 PID 不变，并使 Web Dev 保持 auto_start=false"
+          ],
+          "test_status": "passed",
+          "evidence": [
+            "2026-07-16: baseline audit drift=1 (missing root Start launcher); PolarPort and PolarProcess healthy; polarcop-hub running with verified PID 13289 on active owner port 8040; polarcop-web-dev stale starting with pid=null and port 5180 unbound",
+            "2026-07-16: baseline Web Vitest 23/23 and Vite build passed; VSCode compile passed; Hub baseline 177/191 with 14 pre-existing durable-event/task/role lifecycle failures",
+            "2026-07-16: runtime governance contract and shell syntax passed; Web Vitest 23/23, Vite build, VSCode compile and project governance audit passed; Hub remained at its 177/191 baseline with the same 14 failures",
+            "2026-07-16: Hub TypeScript build still reports 10 pre-existing errors in alerts/checkup/runner/tools; the changed server.ts introduces no compiler error",
+            "2026-07-16: PolarProcess records updated in place; polarcop-hub stayed running with unchanged verified PID 13289, auto_start=true and port 8040; PolarPort retained exactly one active Hub owner and Hub health remained green",
+            "2026-07-16: polarcop-web-dev normalized through its exact PolarProcess stop endpoint to stopped/pid=null/auto_start=false; port 5180 has no listener or active PolarPort record; final governance audit compliant"
+          ]
+        }
+      ],
+      "blockers": []
     }
   ],
   "tech": {
@@ -1413,17 +1446,41 @@
   },
   "service_management": {
     "install_command": "npm ci",
-    "start_command": "npm run dev",
-    "restart_command": "npm run dev",
+    "start_command": "bash Start/hub.sh",
+    "restart_command": "bash Start/hub.sh",
     "health_endpoint": "http://127.0.0.1:8040/api/ui/prompts",
-    "notes": "Hub 端口通过 PolarPort SDK 动态分配（env PC_HUB_PORT，preferred 8040，当前 active 8040）"
+    "preferred_port": 8040,
+    "service_id": "polarcop-hub",
+    "auto_start": true,
+    "process_mode": "foreground_command",
+    "services": [
+      {
+        "service_id": "polarcop-hub",
+        "name": "PolarCopilot Hub",
+        "start_command": "bash Start/hub.sh",
+        "health_endpoint": "http://127.0.0.1:8040/api/ui/prompts",
+        "preferred_port": 8040,
+        "auto_start": true,
+        "process_mode": "foreground_command"
+      },
+      {
+        "service_id": "polarcop-web-dev",
+        "name": "PolarCopilot Web (Dev)",
+        "start_command": "bash Start/web-dev.sh",
+        "health_endpoint": "http://127.0.0.1:5180/",
+        "preferred_port": 5180,
+        "auto_start": false,
+        "process_mode": "foreground_command"
+      }
+    ],
+    "notes": "两服务原位接入 PolarPort + PolarProcess；Hub 迁移注册不得改变当前 live PID"
   },
   "depends_on": [
     "PolarPort/sdk",
     "PolarClaw (LLM proxy, SDK)"
   ],
   "contacts": {
-    "last_updated": "2026-05-13",
-    "updated_by": "polaris.json-creation-agent"
+    "last_updated": "2026-07-16",
+    "updated_by": "codex-runtime-governance"
   }
 }

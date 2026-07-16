@@ -93,10 +93,18 @@ const { claimPort, registerCapabilities } = _require(portSdkPath) as {
 
 async function findExistingHub(): Promise<number | null> {
   try {
-    const resp = await fetch('http://127.0.0.1:4800/api/ports');
+    const resp = await fetch('http://127.0.0.1:11050/api/list');
     if (!resp.ok) return null;
-    const ports = (await resp.json()) as Array<{ port: number; project: string }>;
-    const candidates = ports.filter((p) => p.project?.toLowerCase().includes('polarcop'));
+    const ports = (await resp.json()) as Array<{
+      port: number;
+      project: string;
+      service_name?: string;
+      status?: string;
+    }>;
+    const candidates = ports.filter((p) =>
+      p.project === 'PolarCopilot'
+      && p.service_name === 'polarcop-hub'
+      && p.status === 'active');
     for (const c of candidates) {
       try {
         const ctrl = new AbortController();
@@ -130,21 +138,11 @@ if (existingPort) {
 }
 
 let port: number;
-const forcePort = process.env.PC_HUB_PORT ? Number(process.env.PC_HUB_PORT) : null;
 try {
-  const claimed = await claimPort({ service: 'polarcop-hub', project: 'PolarCopilot', preferred });
-  port = forcePort ?? claimed;
-  if (forcePort && forcePort !== claimed) {
-    logger.warn({ forcePort, claimed }, 'PC_HUB_PORT overrides port-sdk assignment');
-  }
+  port = await claimPort({ service: 'polarcop-hub', project: 'PolarCopilot', preferred });
 } catch (e: unknown) {
-  if (forcePort) {
-    port = forcePort;
-    logger.warn({ forcePort, err: e instanceof Error ? e.message : String(e) }, 'port-sdk failed, using PC_HUB_PORT override');
-  } else {
-    logger.fatal({ err: e instanceof Error ? e.message : String(e) }, 'port-sdk claimPort failed — SOTAgent unreachable, refusing to start (per port-sdk-mandatory rule)');
-    process.exit(1);
-  }
+  logger.fatal({ err: e instanceof Error ? e.message : String(e) }, 'PolarPort claimPort failed; refusing to start');
+  process.exit(1);
 }
 
 const capPath = join(dirname(new URL(import.meta.url).pathname), '..', 'capabilities.json');
