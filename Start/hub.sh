@@ -33,6 +33,12 @@ if [ ! -f "$TSX_BIN" ]; then
   exit 1
 fi
 
+# Self-heal native-addon ABI drift (installs done under a different Node
+# recompile better-sqlite3 for the wrong NODE_MODULE_VERSION and crash-loop
+# the hub); probe with the exact NODE_BIN used below and rebuild on mismatch.
+source "$HOME/Polarisor/Agent_core/scripts/native-abi-guard.sh"
+ensure_native_abi "$PROJECT_DIR/hub" "$NODE_BIN" better-sqlite3 || exit 1
+
 if ! curl -fsS --max-time 3 "$POLARPORT_URL/api/health" >/dev/null; then
   echo "PolarPort is unavailable; refusing preferred-port fallback" >&2
   exit 1

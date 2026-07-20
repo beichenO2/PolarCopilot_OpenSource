@@ -1417,7 +1417,8 @@
             "2026-07-16: runtime governance contract and shell syntax passed; Web Vitest 23/23, Vite build, VSCode compile and project governance audit passed; Hub remained at its 177/191 baseline with the same 14 failures",
             "2026-07-16: Hub TypeScript build still reports 10 pre-existing errors in alerts/checkup/runner/tools; the changed server.ts introduces no compiler error",
             "2026-07-16: PolarProcess records updated in place; polarcop-hub stayed running with unchanged verified PID 13289, auto_start=true and port 8040; PolarPort retained exactly one active Hub owner and Hub health remained green",
-            "2026-07-16: polarcop-web-dev normalized through its exact PolarProcess stop endpoint to stopped/pid=null/auto_start=false; port 5180 has no listener or active PolarPort record; final governance audit compliant"
+            "2026-07-16: polarcop-web-dev normalized through its exact PolarProcess stop endpoint to stopped/pid=null/auto_start=false; port 5180 has no listener or active PolarPort record; final governance audit compliant",
+            "2026-07-20: root-caused hub crash loop to better-sqlite3 built for NODE_MODULE_VERSION 115 (Node 20) while launcher runs Node 22 (127) -> ERR_DLOPEN_FAILED at new Database(); fixed via npm rebuild under Node 22 and hardened Start/hub.sh with Agent_core/scripts/native-abi-guard.sh (constructor-level probe + self-rebuild) plus hub/.npmrc engine-strict=true (Node 20 installs now fail EBADENGINE); verified by sandbox mismatch heal test and PolarProcess restart (pid 81738, health 200 in 2s, /pc/ 200)"
           ]
         }
       ],
