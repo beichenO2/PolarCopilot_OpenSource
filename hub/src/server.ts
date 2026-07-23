@@ -1,4 +1,5 @@
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { homedir } from 'node:os';
 import { dirname, join } from 'node:path';
 import pino from 'pino';
 import { BroadcastPublisher } from './broadcast/publisher.js';
@@ -23,6 +24,9 @@ import { createCheckupRouter } from './checkup/route.js';
 import { createLobsterRouter } from './lobster/router.js';
 import { createAlertsRouter } from './alerts/router.js';
 import { createToolsRouter } from './tools/router.js';
+import { createXjRouter } from './xj/router.js';
+import { defaultXjSkillRoot, XjSkillRouter } from './xj/skill-router.js';
+import { XjFileStore } from './xj/store.js';
 
 const logger = pino({ level: process.env.LOG_LEVEL ?? 'info' }, pino.destination(2));
 const hubStartedAt = new Date();
@@ -46,6 +50,9 @@ taskService.setLimiter(safetyLimiter);
 taskService.setAffinityService(moduleAffinityService);
 const auditJournal = new AuditJournal(db);
 const lifecycleTracker = new LifecycleTracker(publisher, logger);
+const xjDataRoot = process.env.PC_XJ_DATA_ROOT ?? join(homedir(), '.polarcopilot', 'xj');
+const xjStore = new XjFileStore(xjDataRoot, { staleAfterMs: 24 * 60 * 60 * 1000 });
+const xjSkillRouter = new XjSkillRouter(defaultXjSkillRoot());
 
 const stopConfigWatch = watchConfig(process.cwd(), (cfg) => {
   logger.info({ version: cfg.version }, 'config.json reloaded');
@@ -75,6 +82,9 @@ mountStreamableHttpHub(app, {
   lifecycleTracker,
   questionService,
 });
+// Mount after the shared /api/ui middleware so XJ inherits host validation,
+// rate limiting, and the standard UI response headers.
+app.use('/api', createXjRouter({ store: xjStore, skillRouter: xjSkillRouter, logger }));
 
 const portFilePath = join(dirname(dbPath), 'last-port');
 let savedPort: number | undefined;

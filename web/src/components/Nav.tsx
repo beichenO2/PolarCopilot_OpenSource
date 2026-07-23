@@ -5,6 +5,7 @@ const links = [
   { to: '/', label: 'Dashboard' },
   { to: '/start-agent', label: 'Start Agent' },
   { to: '/prompts', label: 'Agent Control' },
+  { to: '/xj', label: 'XJ' },
   { to: '/ssot', label: 'SSoT' },
   { to: '/prolusion', label: 'Prolusion' },
   { to: '/yolo', label: 'YOLO' },

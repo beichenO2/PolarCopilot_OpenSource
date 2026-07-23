@@ -17,7 +17,11 @@
     "sync-skills": "bash scripts/sync-skills.sh",
     "verify-skills": "bash scripts/sync-skills.sh --verify",
     "sync-handoff": "bash scripts/sync-handoff-rule.sh",
-    "verify-handoff": "bash scripts/sync-handoff-rule.sh --verify"
+    "verify-handoff": "bash scripts/sync-handoff-rule.sh --verify",
+    "xj:mcp": "tsx src/xj/stdio-server.ts",
+    "xj:mcp:built": "node dist/xj/stdio-server.js",
+    "xj:install": "node ../scripts/install-xj-mcp.mjs",
+    "xj:verify": "node ../scripts/install-xj-mcp.mjs --verify"
   },
   "dependencies": {
     "@cfworker/json-schema": "^4.1.1",

@@ -4,7 +4,7 @@
     "schema_version": "1.0",
     "last_synced_at": "2026-07-13T09:36:23+08:00"
   },
-  "description": "Polarisor 的 Agent 协调基础设施。核心是 MCP Hub（Node.js/Express 后端）和 React Web UI。Hub 作为中心化事件代理，管理多个 Cursor IDE Agent 的注册、心跳、任务派发和生命周期。Web UI 主导航 10 项：Dashboard、Prompts、SSoT、Prolusion（4 阶段结构化规划）、YOLO（对齐审核）、Pilot（PolarClaw 代理）、Evolution（自进化）、Tasks（任务管理与进度）、Merge（分支合并）、Start Agent（Agent 启动器）。通信层使用 MCP Streamable HTTP 协议 + Server-Sent Events 实现零轮询实时推送。",
+  "description": "Polarisor 的 Agent 协调基础设施。核心是 MCP Hub（Node.js/Express 后端）和 React Web UI。Hub 作为中心化事件代理，管理多个 Cursor IDE Agent 的注册、心跳、任务派发和生命周期。Web UI 主导航包含 Dashboard、Agent Control、XJ 持续会话、SSoT、Prolusion、YOLO、Pilot、Evolution、检修历史与 Start Agent。通信层使用 MCP、REST 与 Server-Sent Events 提供实时交互。",
   "tier": "infra",
   "status": "active",
   "version": "0.1.0",
@@ -46,6 +46,58 @@
           "test_status": "passed",
           "evidence": [
             "2026-05-13: hub core contract tests 74/74 passed; web tests 13/13 passed; integration/e2e tests need MCP server (pre-existing)"
+          ]
+        },
+        {
+          "name": "XJ 持续会话页面与 stdio MCP",
+          "status": "done",
+          "tech": [
+            "React 18",
+            "stdio MCP",
+            "本地原子文件队列",
+            "SSE EventSource"
+          ],
+          "interfaces": [
+            "GET/POST /api/ui/xj/sessions",
+            "GET /api/ui/xj/sessions/:id",
+            "POST /api/ui/xj/sessions/:id/messages",
+            "PATCH /api/ui/xj/sessions/:id/modes",
+            "PATCH /api/ui/xj/sessions/:id/automation",
+            "MCP register_session/wait_message/reply_message/report_progress/update_automation"
+          ],
+          "behavior": [
+            "HUB Web 生成 launchId 身份令牌和一键复制启动 Prompt，默认启用夜晚挂机与安全研究双模式",
+            "launchId/sessionId 创建去重并恢复同一 xj-mcp-agent-* 会话 ID，同时兼容旧 client_key",
+            "默认身份为通用 Agent/general-purpose，不再注入特定专业角色",
+            "每个主会话自动创建两个稳定子 Agent，并在 Web 提供三个独立启动 Prompt 复制按钮",
+            "主 Agent 通过 list_subagents/dispatch_subagent_task 派发工作，子 Agent reply 自动作为 XJ_MSG AGENT_RESULT 回流主 inbox",
+            "每条 Web 输入按完整工作单执行：中途只上报 progress，主 Agent 自动派发、回收、整合并在 TODO 清零和验证通过后一次性交付",
+            "即使用户选中子 Agent 输入，HUB 也会将任务归一路由到所属主 Agent，避免绕过协调编队",
+            "register_session schema 原生要求 launchId/name 且不暴露 client_key；旧调用隔离到 register_legacy_session",
+            "HUB Web 对所有 launchId 请求强制归一为通用 1+2 编队，旧浏览器缓存无法再创建定向身份",
+            "自动合并曾把 launchId 错当 client_key 创建的重复 xj-* 会话，保留历史并迁入规范主会话",
+            "session/history/inbox/progress/automation 本地持久化",
+            "wait_message 阻塞等待并用原子 rename claim 消息，claim 超时自动重排队且 reply 后确认清理",
+            "waiting/online/pending/connecting/working/paused/completed 状态",
+            "透明应用 Prompt 要求回复后继续 wait_message",
+            "自动路由安全研究、夜晚挂机和其他匹配技能",
+            "三栏 UI 复用 Agent Control 的 Markdown、通知、输入和可调宽布局",
+            "挂机循环支持验收标准冻结、TODO、质量证据、失败路径、暂停恢复与循环上限",
+            "验收标准或进度 TODO 未完成时拒绝 complete_session，paused/completed 终态停止轮询",
+            "stdio 跨进程写入通过文件摘要桥实时推送至 HUB Web SSE"
+          ],
+          "test_status": "passed",
+          "evidence": [
+            "2026-07-24: XJ Hub 单元/协议/API/SSE 测试 34/34 passed；XJ TypeScript strict targeted compile passed",
+            "2026-07-24: 单次输入直达完成 Prompt、加号固定 1+2 请求及子 Agent 选中时自动回主路由测试通过",
+            "2026-07-24: Web 全量测试 28/28 passed；tsc + Vite production build passed",
+            "2026-07-24: 真实 Start/xj-mcp.sh stdio smoke passed（HUB launchId 发令牌、camelCase 注册、断线重连同一 sessionId、wait_message 持续循环、reply suggestions 持久化）",
+            "2026-07-24: 3 个独立 stdio client 真实编队验收通过（1 主 + 2 子、并行派发、双结果回流、最终 processing claims=0）",
+            "2026-07-24: register_session 真实 listTools schema required=[launchId,name] 且 properties 不含 client_key；Cursor MCP schema version=2",
+            "2026-07-24: 线上错误 legacy launchId 别名已合并，3 条历史完整迁移至通用主会话并生成两个子 Agent",
+            "2026-07-24: polarcop-xj 已安装并 verify 到 ~/.cursor/mcp.json；保留全部既有 MCP server",
+            "2026-07-24: PolarProcess 受控重启后 /api/ui/xj/sessions、XJ SSE、/pc/xj 新版静态资源均通过；runtime governance audit compliant",
+            "2026-07-24: Hub 全量基线 210/224 passed；14 个既有 broadcast/task/role e2e 失败与 XJ 路径无关，XJ 5 test files 全部通过"
           ]
         },
         {
@@ -1481,7 +1533,7 @@
     "PolarClaw (LLM proxy, SDK)"
   ],
   "contacts": {
-    "last_updated": "2026-07-16",
-    "updated_by": "codex-runtime-governance"
+    "last_updated": "2026-07-24",
+    "updated_by": "codex-xj-implementation"
   }
 }

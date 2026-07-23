@@ -10,6 +10,7 @@ import { PilotPage } from './pages/PilotPage'
 import ProlusionPage from './pages/ProlusionPage'
 import { StartAgentPage } from './pages/StartAgentPage'
 import { CheckupEventsPage } from './pages/CheckupEventsPage'
+import { XjPage } from './pages/XjPage'
 // Self-host the checkup widget (dogfood). Side-effect import registers the
 // <polar-checkup> custom element so the JSX tag below works.
 import './checkup'
@@ -61,6 +62,7 @@ export default function App() {
           <Route element={<Layout />}>
             <Route path="/" element={<DashboardPage />} />
             <Route path="/prompts" element={<PromptsPage />} />
+            <Route path="/xj" element={<XjPage />} />
             <Route path="/ssot" element={<SSOTPage />} />
             <Route path="/prolusion" element={<ProlusionPage />} />
             <Route path="/yolo" element={<YoloPage />} />

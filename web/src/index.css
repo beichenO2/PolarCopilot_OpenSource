@@ -110,6 +110,16 @@ body {
   color: #e6edf3;
 }
 
+.xj-shell {
+  background:
+    radial-gradient(circle at 47% -15%, rgba(56, 189, 248, 0.08), transparent 34%),
+    #0d1117;
+}
+
+.xj-sidebar {
+  box-shadow: inset -18px 0 30px -30px rgba(56, 189, 248, 0.4);
+}
+
 /* SSoT reference links in markdown — normal text style, clickable */
 .ssot-ref {
   color: #58a6ff;
