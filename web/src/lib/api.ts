@@ -1,6 +1,6 @@
 import type { Agent, Prompt, HubEvent, Task, AgentsSummary, ServiceHealth, ProjectData, EcoService, PortEntry, DeviceResource } from '../types/hub'
 import type { PilotStatusSummary, LobsterStatus, LobsterEvent } from '../types/pilot-status'
-import type { XjAutomation, XjSession, XjSessionDetail, XjSkill } from '../types/xj'
+import type { RrSession, RrSessionDetail, RrSubagent } from '../types/rr'
 
 export interface EvolutionSignal {
   id: string
@@ -389,36 +389,22 @@ export const api = {
     endSession: (sessionId: string) =>
       del<{ ok: boolean }>(`/api/ui/polarclaw/session/${sessionId}`),
   },
-  xj: {
-    sessions: () => get<{ sessions: XjSession[] }>('/api/ui/xj/sessions'),
+  rr: {
+    sessions: () => get<{ sessions: RrSession[] }>('/api/ui/rr/sessions'),
     createSession: (data: {
-      client_key?: string
       sessionId?: string
       launchId?: string
       name?: string
       role?: string
-      title?: string
-      modes?: string[]
-      subagent_count?: number
     }) =>
-      post<{ session: XjSession; subagents: XjSession[]; deduplicated: boolean }>('/api/ui/xj/sessions', data),
-    detail: (id: string) => get<XjSessionDetail>(`/api/ui/xj/sessions/${id}`),
-    remove: (id: string) => del<{ ok: boolean }>(`/api/ui/xj/sessions/${id}`),
+      post<{ session: RrSession; deduplicated: boolean }>('/api/ui/rr/sessions', data),
+    detail: (id: string) => get<RrSessionDetail>(`/api/ui/rr/sessions/${id}`),
+    update: (id: string, data: { title?: string; agentStatus?: string; isSubagent?: boolean }) =>
+      patch<{ session: RrSession }>(`/api/ui/rr/sessions/${id}`, data),
+    remove: (id: string) => del<{ ok: boolean }>(`/api/ui/rr/sessions/${id}`),
     send: (id: string, content: string) =>
-      post<{ message: unknown; matched_skills: XjSkill[] }>(`/api/ui/xj/sessions/${id}/messages`, { content }),
-    setModes: (id: string, modes: string[]) =>
-      patch<{ session: XjSession }>(`/api/ui/xj/sessions/${id}/modes`, { modes }),
-    setAutomation: (id: string, data: {
-      enabled?: boolean
-      state?: XjAutomation['state']
-      loop_limit?: number
-      acceptance_criteria?: string[]
-      completed_criteria?: string[]
-      todo?: string[]
-    }) => patch<{ automation: XjAutomation }>(`/api/ui/xj/sessions/${id}/automation`, data),
-    pause: (id: string) => post<{ automation: XjAutomation }>(`/api/ui/xj/sessions/${id}/pause`),
-    resume: (id: string) => post<{ automation: XjAutomation }>(`/api/ui/xj/sessions/${id}/resume`),
-    skills: () => get<{ skills: XjSkill[] }>('/api/ui/xj/skills'),
+      post<{ message: unknown }>(`/api/ui/rr/sessions/${id}/messages`, { content }),
+    subagents: (sessionId?: string) => get<{ subagents: RrSubagent[] }>(`/api/ui/rr/subagents${sessionId ? `?sessionId=${encodeURIComponent(sessionId)}` : ''}`),
   },
   pilotStatus: {
     summary: () => get<PilotStatusSummary>('/api/ui/pilot-status'),

@@ -18,10 +18,16 @@
     "verify-skills": "bash scripts/sync-skills.sh --verify",
     "sync-handoff": "bash scripts/sync-handoff-rule.sh",
     "verify-handoff": "bash scripts/sync-handoff-rule.sh --verify",
-    "xj:mcp": "tsx src/xj/stdio-server.ts",
-    "xj:mcp:built": "node dist/xj/stdio-server.js",
-    "xj:install": "node ../scripts/install-xj-mcp.mjs",
-    "xj:verify": "node ../scripts/install-xj-mcp.mjs --verify"
+    "rr:mcp": "tsx src/rr/stdio-server.ts",
+    "rr:mcp:built": "node dist/rr/stdio-server.js",
+    "rr:install": "node ../scripts/install-rr-mcp.mjs",
+    "rr:verify": "node ../scripts/install-rr-mcp.mjs --verify",
+    "rr:xj:dry-run": "tsx src/rr/xj-migration-cli.ts --dry-run",
+    "rr:xj:import": "tsx src/rr/xj-migration-cli.ts --import",
+    "rr:xj:verify": "tsx src/rr/xj-migration-cli.ts --verify",
+    "rr:xj:cleanup:scan": "tsx src/rr/xj-cleanup-cli.ts --scan",
+    "rr:xj:cleanup:gate": "tsx src/rr/xj-cleanup-cli.ts --create-gate",
+    "rr:xj:cleanup:apply": "tsx src/rr/xj-cleanup-cli.ts --apply"
   },
   "dependencies": {
     "@cfworker/json-schema": "^4.1.1",
