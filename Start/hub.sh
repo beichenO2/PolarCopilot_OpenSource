@@ -55,4 +55,6 @@ fi
 
 cd "$PROJECT_DIR/hub"
 export PC_HUB_PORT=$PORT
+# Spawn workspace for Hub → cursor-agent (override: PC_PROJECT_DIR or RR_CURSOR_WORKSPACE)
+export PC_PROJECT_DIR="${PC_PROJECT_DIR:-${RR_CURSOR_WORKSPACE:-$PROJECT_DIR}}"
 exec "$NODE_BIN" "$TSX_BIN" src/server.ts

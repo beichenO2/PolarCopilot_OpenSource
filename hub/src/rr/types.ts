@@ -28,6 +28,8 @@ export interface RrSession {
   role?: string;
   launchId?: string;
   title: string;
+  /** 用户在面板重命名后锁定，禁止 Agent/Hub 自动改写 title（及 register 回写 name） */
+  titleLocked?: boolean;
   createdAt: number;
   lastActiveAt: number;
   agentStatus: string;
@@ -38,6 +40,10 @@ export interface RrSession {
   uiLocale: string;
   lastMessageTs: number;
   status: RrSessionStatus;
+  /** Hub-spawned cursor-agent CLI pid; cleared when process exits or session removed */
+  cursorAgentPid?: number;
+  /** PolarProcess service id for this session's cursor-agent (rr-cursor-{sessionId}) */
+  polarProcessServiceId?: string;
   activeTask?: RrActiveTask;
   compat?: RrXjCompatibility;
 }

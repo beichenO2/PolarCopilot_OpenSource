@@ -64,7 +64,7 @@ export function createRrMcpServer(store: RrFileStore): McpServer {
   const ownerInstanceId = `rr-mcp-instance-${randomUUID()}`;
 
   server.registerTool('register_session', {
-    description: 'Register this Rr agent session once at chat start. If the user sends the single message "continue", call this tool with name="continue" and no IDs to restore the latest imported XJ session, plan, tasks and subagent topology. Otherwise first registration needs only name; reconnect with the same sessionId or launchId.',
+    description: 'Register this Rr agent session once at chat start. If the user sends the single message "continue", call this tool with name="continue" and no IDs to restore the latest imported XJ session, plan, tasks and subagent topology. When Hub spawn prompt includes a pre-assigned sessionId, you MUST pass that exact sessionId (and launchId if present) — never create a duplicate session.',
     inputSchema: {
       sessionId: z.string().optional(),
       name: z.string(),

@@ -120,6 +120,13 @@ body {
   box-shadow: inset -18px 0 30px -30px rgba(56, 189, 248, 0.4);
 }
 
+/* Rr 三栏各自滚动：禁止外壳把 overflow 传给整页 */
+.rr-shell,
+.rr-shell > aside,
+.rr-shell > main {
+  min-height: 0;
+}
+
 /* SSoT reference links in markdown — normal text style, clickable */
 .ssot-ref {
   color: #58a6ff;

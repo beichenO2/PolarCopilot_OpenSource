@@ -1,4 +1,4 @@
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
@@ -88,6 +88,56 @@ describe('Rr MCP compatibility contract', () => {
     expect(tick).toContain('[POLL_TICK]');
     expect(tick).toContain('[RR_MSG · KEEPALIVE]');
     expect(tick).not.toContain('XJ');
+  });
+
+  it('locks user-renamed title against reply_message and register name overwrite', async () => {
+    const { store, server, client } = await harness();
+    const session = store.register({ name: 'Rr Agent · 主', launchId: 'rrlaunch-lock-1' }).session;
+    store.updateSession(session.sessionId, { title: '我的固定名', titleLocked: true });
+    expect(store.getSession(session.sessionId).title).toBe('我的固定名');
+    expect(store.getSession(session.sessionId).titleLocked).toBe(true);
+
+    await client.callTool({
+      name: 'reply_message',
+      arguments: { sessionId: session.sessionId, content: 'hello', title: '任务标题覆盖' },
+    });
+    expect(store.getSession(session.sessionId).title).toBe('我的固定名');
+
+    // Hub 自动 stamp（不带 titleLocked）不得覆盖
+    store.updateSession(session.sessionId, { title: '主 · stamp-auto' });
+    expect(store.getSession(session.sessionId).title).toBe('我的固定名');
+
+    const reReg = store.register({
+      sessionId: session.sessionId,
+      launchId: 'rrlaunch-lock-1',
+      name: 'Agent 想改的名字',
+    });
+    expect(reReg.session.name).toBe('Rr Agent · 主');
+    expect(reReg.session.title).toBe('我的固定名');
+
+    // 用户再次重命名仍可改
+    store.updateSession(session.sessionId, { title: '第二次人工名', titleLocked: true });
+    expect(store.getSession(session.sessionId).title).toBe('第二次人工名');
+
+    await client.close();
+    await server.close();
+  });
+
+  it('lists sessions by createdAt not lastActiveAt', () => {
+    const root = mkdtempSync(join(tmpdir(), 'rr-sort-'));
+    roots.push(root);
+    const store = new RrFileStore(root);
+    const older = store.register({ name: 'Older' }).session;
+    const newer = store.register({ name: 'Newer' }).session;
+    // 强制拉开创建时间，避免同毫秒撞车；并让 older 的 lastActiveAt 更大
+    const olderPath = join(root, 'sessions', `${older.sessionId}.json`);
+    const newerPath = join(root, 'sessions', `${newer.sessionId}.json`);
+    const olderRaw = JSON.parse(readFileSync(olderPath, 'utf8')) as typeof older;
+    const newerRaw = JSON.parse(readFileSync(newerPath, 'utf8')) as typeof newer;
+    writeFileSync(olderPath, `${JSON.stringify({ ...olderRaw, createdAt: 1_000, lastActiveAt: 9_000 }, null, 2)}\n`);
+    writeFileSync(newerPath, `${JSON.stringify({ ...newerRaw, createdAt: 2_000, lastActiveAt: 2_100 }, null, 2)}\n`);
+    const ids = store.listSessions().map((session) => session.sessionId);
+    expect(ids.indexOf(newer.sessionId)).toBeLessThan(ids.indexOf(older.sessionId));
   });
 });
 

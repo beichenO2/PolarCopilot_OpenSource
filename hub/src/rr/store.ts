@@ -12,6 +12,7 @@ import {
   writeFileSync,
 } from 'node:fs';
 import { basename, join } from 'node:path';
+import { stopCursorAgentForSession } from './cursor-spawn.js';
 import type { RrActiveTask, RrMessage, RrResumeContext, RrSession, RrSubagentView } from './types.js';
 import { auditXjSource } from './xj-migration.js';
 
@@ -26,6 +27,11 @@ interface RegisterInput {
   name: string;
   role?: string;
   launchId?: string;
+}
+
+interface DeletedTombstones {
+  sessionIds: Record<string, number>;
+  launchIds: Record<string, number>;
 }
 
 interface ReplyMetadata {
@@ -88,6 +94,8 @@ export class RrFileStore {
   register(input: RegisterInput, ownerInstanceId?: string): { session: RrSession; deduplicated: boolean; resume?: RrResumeContext } {
     const name = input.name.trim();
     if (!name) throw new Error('invalid_name');
+    if (input.sessionId && this.isSessionDeleted(input.sessionId)) throw new Error('session_deleted');
+    if (input.launchId && this.isLaunchIdDeleted(input.launchId)) throw new Error('session_deleted');
     if (!input.sessionId && !input.launchId && name.toLowerCase() === 'continue') {
       if (!ownerInstanceId) throw new Error('resume_owner_required');
       const resume = this.resumeLatestImportedSession(ownerInstanceId);
@@ -103,7 +111,8 @@ export class RrFileStore {
       if (input.launchId && existing.launchId && input.launchId !== existing.launchId) throw new Error('invalid_launch_id');
       const next = this.saveSession({
         ...existing,
-        name,
+        // 用户锁定标题后，禁止 register 用 Agent 传入的 name 覆盖展示名
+        name: existing.titleLocked ? existing.name : name,
         role: input.role ?? existing.role,
         launchId: input.launchId ?? existing.launchId,
         lastActiveAt: now,
@@ -143,9 +152,10 @@ export class RrFileStore {
 
   listSessions(): RrSession[] {
     this.recoverStaleTasks();
+    // 稳定按创建时间（新→旧），勿按 lastActiveAt/lastMessage 重排抢注意力
     return this.listSessionsRaw()
       .map((session) => this.withRuntimeState(session))
-      .sort((a, b) => b.lastActiveAt - a.lastActiveAt);
+      .sort((a, b) => (b.createdAt - a.createdAt) || a.sessionId.localeCompare(b.sessionId));
   }
 
   resumeLatestImportedSession(ownerInstanceId: string): RrResumeContext {
@@ -217,12 +227,21 @@ export class RrFileStore {
     return next;
   }
 
-  updateSession(sessionId: string, patch: { title?: string; agentStatus?: string }, ownerInstanceId?: string): RrSession {
+  updateSession(
+    sessionId: string,
+    patch: { title?: string; agentStatus?: string; titleLocked?: boolean },
+    ownerInstanceId?: string,
+  ): RrSession {
     if (ownerInstanceId !== undefined) this.assertResumeOwner(sessionId, ownerInstanceId);
     const session = this.getSession(sessionId);
+    const userRename = patch.titleLocked === true;
+    const nextTitle = patch.title !== undefined && (!session.titleLocked || userRename)
+      ? patch.title.slice(0, 40)
+      : session.title;
     return this.saveSession({
       ...session,
-      ...(patch.title !== undefined ? { title: patch.title.slice(0, 40) } : {}),
+      title: nextTitle,
+      ...(userRename ? { titleLocked: true } : {}),
       ...(patch.agentStatus !== undefined ? { agentStatus: patch.agentStatus } : {}),
       lastActiveAt: Date.now(),
       online: true,
@@ -253,7 +272,8 @@ export class RrFileStore {
     this.acknowledgeOne(sessionId, (claim) => claim.metadata?.type !== 'subagent_task', resumeLease?.leaseId);
     this.saveSession({
       ...session,
-      title: metadata.title?.slice(0, 40) ?? session.title,
+      // reply_message 的 title 仅在未锁定时可自动改写
+      title: session.titleLocked ? session.title : (metadata.title?.slice(0, 40) ?? session.title),
       agentStatus: metadata.agentStatus ?? session.agentStatus,
       lastActiveAt: Date.now(),
       lastMessageTs: message.createdAt,
@@ -486,6 +506,8 @@ export class RrFileStore {
 
   removeSession(sessionId: string): void {
     const id = safeSessionId(sessionId);
+    this.tombstoneSession(id);
+    this.killCursorAgentForSession(id);
     rmSync(this.sessionPath(id), { force: true });
     rmSync(join(this.root, 'history', `${id}.jsonl`), { force: true });
     rmSync(join(this.root, 'inbox', id), { recursive: true, force: true });
@@ -502,6 +524,93 @@ export class RrFileStore {
       waiting: sessions.filter((session) => session.waiting).length,
       pending: sessions.reduce((sum, session) => sum + session.pendingMessages, 0),
     };
+  }
+
+  setCursorAgentManaged(
+    sessionId: string,
+    managed: { pid: number; polarProcessServiceId: string },
+  ): RrSession {
+    const session = this.getSession(sessionId);
+    return this.saveSession({
+      ...session,
+      cursorAgentPid: managed.pid,
+      polarProcessServiceId: managed.polarProcessServiceId,
+    });
+  }
+
+  setCursorAgentPid(sessionId: string, pid: number): RrSession {
+    const session = this.getSession(sessionId);
+    return this.saveSession({ ...session, cursorAgentPid: pid });
+  }
+
+  killCursorAgentForSession(sessionId: string): void {
+    const path = this.sessionPath(sessionId);
+    if (!existsSync(path)) return;
+    let session: RrSession;
+    try {
+      session = readJson<RrSession>(path);
+    } catch {
+      return;
+    }
+    if (!session.cursorAgentPid && !session.polarProcessServiceId) return;
+    void stopCursorAgentForSession(session);
+    const { cursorAgentPid: _pid, polarProcessServiceId: _serviceId, ...rest } = session;
+    this.saveSession(rest);
+  }
+
+  listTrackedCursorAgentPids(): number[] {
+    return this.listSessions()
+      .map((session) => session.cursorAgentPid)
+      .filter((pid): pid is number => typeof pid === 'number' && pid > 0);
+  }
+
+  isSessionDeleted(sessionId: string): boolean {
+    const tombstones = this.readTombstones();
+    return sessionId in tombstones.sessionIds;
+  }
+
+  isLaunchIdDeleted(launchId: string): boolean {
+    const tombstones = this.readTombstones();
+    return launchId in tombstones.launchIds;
+  }
+
+  sessionExists(sessionId: string): boolean {
+    return existsSync(this.sessionPath(sessionId));
+  }
+
+  private tombstonePath(): string {
+    return join(this.root, 'deleted-tombstones.json');
+  }
+
+  private readTombstones(): DeletedTombstones {
+    const path = this.tombstonePath();
+    if (!existsSync(path)) return { sessionIds: {}, launchIds: {} };
+    try {
+      const raw = readJson<Partial<DeletedTombstones>>(path);
+      return {
+        sessionIds: raw.sessionIds && typeof raw.sessionIds === 'object' ? raw.sessionIds : {},
+        launchIds: raw.launchIds && typeof raw.launchIds === 'object' ? raw.launchIds : {},
+      };
+    } catch {
+      return { sessionIds: {}, launchIds: {} };
+    }
+  }
+
+  private tombstoneSession(sessionId: string): void {
+    const id = safeSessionId(sessionId);
+    const tombstones = this.readTombstones();
+    const now = Date.now();
+    tombstones.sessionIds[id] = now;
+    const path = this.sessionPath(id);
+    if (existsSync(path)) {
+      try {
+        const session = readJson<RrSession>(path);
+        if (session.launchId) tombstones.launchIds[session.launchId] = now;
+      } catch {
+        // Session file may be partially written; still tombstone the session id.
+      }
+    }
+    atomicJson(this.tombstonePath(), tombstones);
   }
 
   private listSessionsRaw(): RrSession[] {

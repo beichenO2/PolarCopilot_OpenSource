@@ -69,7 +69,7 @@
             "Cursor MCP 配置名 rr-chat，serverInfo 为 rr-mcp-server@0.1.0；新会话使用 rr-mcp-agent-*，迁移会话逐字保留 xj-mcp-agent-* 与 xj-mcp-pending-* ID",
             "公开面严格限制为 7 个兼容工具，原版参数名、必填项和文本 envelope 保持一致",
             "wait_message 默认 60 秒并返回变化的 [POLL_TICK] 与 [RR_MSG · KEEPALIVE]，持续驱动本地轮询",
-            "子 Agent 由任意 Rr 会话动态开启，不再自动生成固定 1 主 + 2 子",
+            "子 Agent 可由任意 Rr 会话动态开启；Web「新建进程」会创建固定 1 主 + 2 子并分别 spawn Cursor",
             "派发使用 targetSessionId、持久化 taskId/activeTask、原子 busy 锁和 idle/busy/offline 状态",
             "report_task_progress 只刷新指定 task，complete_subagent_task 回流 [RR_MSG · AGENT_RESULT] 并释放锁",
             "reply_message 只处理普通回复，不再兼任子任务 completion，也不会清除全部 processing claim",
@@ -1516,6 +1516,16 @@
         "preferred_port": 5180,
         "auto_start": false,
         "process_mode": "foreground_command"
+      },
+      {
+        "service_id": "rr-orchestrator",
+        "name": "Rr AFK Orchestrator",
+        "start_command": "bash Start/rr-orchestrator.sh",
+        "health_endpoint": "http://127.0.0.1:8040/api/ui/rr/orchestrator/health",
+        "preferred_port": null,
+        "auto_start": false,
+        "process_mode": "foreground_command",
+        "notes": "Sidecar: no dedicated port; depends on polarcop-hub :8040"
       }
     ],
     "notes": "两服务原位接入 PolarPort + PolarProcess；Hub 迁移注册不得改变当前 live PID"

@@ -1,6 +1,6 @@
 import type { Agent, Prompt, HubEvent, Task, AgentsSummary, ServiceHealth, ProjectData, EcoService, PortEntry, DeviceResource } from '../types/hub'
 import type { PilotStatusSummary, LobsterStatus, LobsterEvent } from '../types/pilot-status'
-import type { RrSession, RrSessionDetail, RrSubagent } from '../types/rr'
+import type { RrSession, RrSessionDetail, RrSubagent, RrSpawnQueueBatch, RrSpawnQueueStatus, RrAfkStatus, RrAfkOneClickResult } from '../types/rr'
 
 export interface EvolutionSignal {
   id: string
@@ -144,6 +144,13 @@ const BASE = ''
 
 async function get<T>(path: string): Promise<T> {
   const res = await fetch(`${BASE}${path}`, { cache: 'no-store' })
+  if (!res.ok) throw new Error(`GET ${path}: ${res.status}`)
+  return res.json() as Promise<T>
+}
+
+async function getOptional<T>(path: string, ...missingStatuses: number[]): Promise<T | null> {
+  const res = await fetch(`${BASE}${path}`, { cache: 'no-store' })
+  if (missingStatuses.includes(res.status)) return null
   if (!res.ok) throw new Error(`GET ${path}: ${res.status}`)
   return res.json() as Promise<T>
 }
@@ -398,13 +405,65 @@ export const api = {
       role?: string
     }) =>
       post<{ session: RrSession; deduplicated: boolean }>('/api/ui/rr/sessions', data),
-    detail: (id: string) => get<RrSessionDetail>(`/api/ui/rr/sessions/${id}`),
-    update: (id: string, data: { title?: string; agentStatus?: string; isSubagent?: boolean }) =>
+    detail: (id: string) => getOptional<RrSessionDetail>(`/api/ui/rr/sessions/${id}`, 404),
+    update: (id: string, data: { title?: string; agentStatus?: string; isSubagent?: boolean; titleLocked?: boolean }) =>
       patch<{ session: RrSession }>(`/api/ui/rr/sessions/${id}`, data),
     remove: (id: string) => del<{ ok: boolean }>(`/api/ui/rr/sessions/${id}`),
     send: (id: string, content: string) =>
       post<{ message: unknown }>(`/api/ui/rr/sessions/${id}/messages`, { content }),
+    spawnCursor: (data: {
+      sessionId?: string
+      launchId?: string
+      name?: string
+      role?: string
+      workspace?: string
+      headless?: boolean
+    }) =>
+      post<{
+        session: RrSession
+        created?: boolean
+        spawn: { ok: true; sessionId: string; workspace: string; pid: number; mode: 'ide' | 'headless'; cursorBin: string }
+      }>('/api/ui/rr/sessions/spawn-cursor', data),
+    spawnCursorForSession: (id: string, data?: { workspace?: string; headless?: boolean; waitUntilOnline?: boolean }) =>
+      post<{
+        session: RrSession
+        spawn: { ok: true; sessionId: string; workspace: string; pid: number; mode: 'ide' | 'headless'; cursorBin: string }
+        queue: RrSpawnQueueStatus
+      }>(`/api/ui/rr/sessions/${id}/spawn-cursor`, data ?? {}),
+    spawnProcess: (data?: { stamp?: string; workspace?: string; subCount?: number; headless?: boolean }) =>
+      post<{
+        batchId: string
+        batch: RrSpawnQueueBatch
+        mainSessionId: string
+        subSessionIds: string[]
+        queue: RrSpawnQueueStatus
+      }>('/api/ui/rr/sessions/spawn-process', data ?? {}),
+    spawnQueueStatus: () => get<{ queue: RrSpawnQueueStatus; latestBatch: RrSpawnQueueBatch | null }>('/api/ui/rr/spawn-queue/status'),
+    spawnQueueBatch: (batchId: string) => get<{ batch: RrSpawnQueueBatch; queue: RrSpawnQueueStatus }>(`/api/ui/rr/spawn-queue/${batchId}`),
     subagents: (sessionId?: string) => get<{ subagents: RrSubagent[] }>(`/api/ui/rr/subagents${sessionId ? `?sessionId=${encodeURIComponent(sessionId)}` : ''}`),
+    runtime: () => get<{ defaultWorkspace: string; orchestratorProjectRoot: string; spawnGapMs?: number }>('/api/ui/rr/runtime'),
+    afkStatus: () => get<RrAfkStatus>('/api/ui/rr/afk/status'),
+    afkArm: (data?: {
+      taskDir?: string
+      taskSlug?: string
+      maxLoops?: number
+      force?: boolean
+      projectRoot?: string
+      masterSessionId?: string
+    }) => post<{ ok: true; armed: true; afkRoot: string; taskDir: string | null; maxLoops: number }>('/api/ui/rr/afk/arm', data ?? {}),
+    afkOneClick: (data?: {
+      sessionId?: string
+      masterSessionId?: string
+      taskDir?: string
+      taskSlug?: string
+      maxLoops?: number
+      force?: boolean
+      projectRoot?: string
+      spawnIfNeeded?: boolean
+      startOrchestrator?: boolean
+    }) => post<RrAfkOneClickResult>('/api/ui/rr/afk/one-click', data ?? {}),
+    afkOrchestratorStart: () => post<{ ok: true; enabled: boolean; running: boolean }>('/api/ui/rr/afk/orchestrator/start'),
+    afkOrchestratorHalt: () => post<{ ok: true; enabled: boolean; running: boolean }>('/api/ui/rr/afk/orchestrator/halt'),
   },
   pilotStatus: {
     summary: () => get<PilotStatusSummary>('/api/ui/pilot-status'),
