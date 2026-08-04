@@ -27,6 +27,9 @@ interface RegisterInput {
   name: string;
   role?: string;
   launchId?: string;
+  afkTaskId?: string;
+  ownerTaskId?: string;
+  ownerMasterSessionId?: string;
 }
 
 interface DeletedTombstones {
@@ -115,6 +118,9 @@ export class RrFileStore {
         name: existing.titleLocked ? existing.name : name,
         role: input.role ?? existing.role,
         launchId: input.launchId ?? existing.launchId,
+        ...(input.afkTaskId !== undefined ? { afkTaskId: input.afkTaskId } : {}),
+        ...(input.ownerTaskId !== undefined ? { ownerTaskId: input.ownerTaskId } : {}),
+        ...(input.ownerMasterSessionId !== undefined ? { ownerMasterSessionId: input.ownerMasterSessionId } : {}),
         lastActiveAt: now,
         online: true,
         status: existing.activeTask ? 'working' : 'online',
@@ -127,6 +133,9 @@ export class RrFileStore {
       name,
       ...(input.role ? { role: input.role } : {}),
       ...(input.launchId ? { launchId: input.launchId } : {}),
+      ...(input.afkTaskId ? { afkTaskId: input.afkTaskId } : {}),
+      ...(input.ownerTaskId ? { ownerTaskId: input.ownerTaskId } : {}),
+      ...(input.ownerMasterSessionId ? { ownerMasterSessionId: input.ownerMasterSessionId } : {}),
       title: name,
       createdAt: now,
       lastActiveAt: now,
@@ -229,7 +238,14 @@ export class RrFileStore {
 
   updateSession(
     sessionId: string,
-    patch: { title?: string; agentStatus?: string; titleLocked?: boolean },
+    patch: {
+      title?: string;
+      agentStatus?: string;
+      titleLocked?: boolean;
+      afkTaskId?: string;
+      ownerTaskId?: string;
+      ownerMasterSessionId?: string;
+    },
     ownerInstanceId?: string,
   ): RrSession {
     if (ownerInstanceId !== undefined) this.assertResumeOwner(sessionId, ownerInstanceId);
@@ -243,6 +259,9 @@ export class RrFileStore {
       title: nextTitle,
       ...(userRename ? { titleLocked: true } : {}),
       ...(patch.agentStatus !== undefined ? { agentStatus: patch.agentStatus } : {}),
+      ...(patch.afkTaskId !== undefined ? { afkTaskId: patch.afkTaskId } : {}),
+      ...(patch.ownerTaskId !== undefined ? { ownerTaskId: patch.ownerTaskId } : {}),
+      ...(patch.ownerMasterSessionId !== undefined ? { ownerMasterSessionId: patch.ownerMasterSessionId } : {}),
       lastActiveAt: Date.now(),
       online: true,
     });

@@ -6,6 +6,9 @@
   "engines": {
     "node": ">=22"
   },
+  "bin": {
+    "pc": "./dist/pc-cli.js"
+  },
   "scripts": {
     "dev": "tsx watch src/server.ts",
     "start": "tsx src/server.ts",
@@ -14,8 +17,8 @@
     "test:watch": "vitest",
     "ssot:audit": "node scripts/ssot-audit.mjs",
     "ssot:audit:strict": "node scripts/ssot-audit.mjs --strict",
-    "sync-skills": "bash scripts/sync-skills.sh",
-    "verify-skills": "bash scripts/sync-skills.sh --verify",
+    "sync-skills": "bash ../scripts/sync-skills.sh",
+    "verify-skills": "bash ../scripts/sync-skills.sh --verify",
     "sync-handoff": "bash scripts/sync-handoff-rule.sh",
     "verify-handoff": "bash scripts/sync-handoff-rule.sh --verify",
     "rr:mcp": "tsx src/rr/stdio-server.ts",
@@ -32,7 +35,10 @@
     "rr:xj:verify": "tsx src/rr/xj-migration-cli.ts --verify",
     "rr:xj:cleanup:scan": "tsx src/rr/xj-cleanup-cli.ts --scan",
     "rr:xj:cleanup:gate": "tsx src/rr/xj-cleanup-cli.ts --create-gate",
-    "rr:xj:cleanup:apply": "tsx src/rr/xj-cleanup-cli.ts --apply"
+    "rr:xj:cleanup:apply": "tsx src/rr/xj-cleanup-cli.ts --apply",
+    "pc": "tsx src/pc-cli.ts",
+    "smoke:afk-modes": "bash ../scripts/smoke-afk-modes.sh",
+    "smoke:afk-short-run": "bash ../scripts/smoke-afk-short-run.sh"
   },
   "dependencies": {
     "@cfworker/json-schema": "^4.1.1",

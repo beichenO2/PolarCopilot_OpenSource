@@ -1,4 +1,9 @@
-import type { RrMessage, RrSession, RrSessionStatus } from '../types/rr'
+import type { RrMessage, RrSession, RrSessionStatus, RrSubagent } from '../types/rr'
+
+/** Brief grace window for completed agents before treating as offline (BinaryLoader-style). */
+export const RR_COMPLETED_GRACE_MS = 15_000
+
+export type RrAvailabilityLike = RrSessionStatus | RrSubagent['availability'] | 'completed'
 
 export const DEFAULT_RR_AGENT_NAME = 'Rr Agent'
 export const DEFAULT_RR_AGENT_ROLE = 'general-purpose'
@@ -19,6 +24,85 @@ const tones: Record<RrSessionStatus, string> = {
 
 export function statusLabel(status: RrSessionStatus): string { return labels[status] }
 export function statusTone(status: RrSessionStatus): string { return tones[status] }
+
+/** True for idle/busy/working/waiting/online; false for offline; completed only within grace. */
+export function isLiveAvailability(
+  availability: string,
+  options?: { completedAt?: number; now?: number; graceMs?: number },
+): boolean {
+  if (availability === 'offline') return false
+  if (availability === 'completed') {
+    const { completedAt, now = Date.now(), graceMs = RR_COMPLETED_GRACE_MS } = options ?? {}
+    if (completedAt == null) return false
+    return now - completedAt <= graceMs
+  }
+  return true
+}
+
+export function isLiveSession(session: Pick<RrSession, 'status' | 'online'>, _now = Date.now()): boolean {
+  if (session.status === 'offline' || !session.online) return false
+  return isLiveAvailability(session.status)
+}
+
+export function partitionSessionsByLiveness(
+  sessions: RrSession[],
+  now = Date.now(),
+): { live: RrSession[]; offline: RrSession[] } {
+  const live: RrSession[] = []
+  const offline: RrSession[] = []
+  for (const session of sessions) {
+    if (isLiveSession(session, now)) live.push(session)
+    else offline.push(session)
+  }
+  return { live, offline }
+}
+
+export function isLiveSubagent(agent: Pick<RrSubagent, 'availability'>, now = Date.now()): boolean {
+  return isLiveAvailability(agent.availability, { now })
+}
+
+export function partitionSubagentsByLiveness(
+  subagents: RrSubagent[],
+  now = Date.now(),
+): { live: RrSubagent[]; offline: RrSubagent[] } {
+  const live: RrSubagent[] = []
+  const offline: RrSubagent[] = []
+  for (const agent of subagents) {
+    if (isLiveSubagent(agent, now)) live.push(agent)
+    else offline.push(agent)
+  }
+  return { live, offline }
+}
+
+/** Lower rank = higher urgency (working > waiting > inbox > online > offline). */
+export function sessionUrgencyRank(session: RrSession): number {
+  if (session.status === 'working') return 0
+  if (session.status === 'waiting') return 1
+  if (session.pendingMessages > 0) return 2
+  if (session.status === 'online') return 3
+  return 4
+}
+
+export function sortSessionsByUrgency(sessions: RrSession[]): RrSession[] {
+  return [...sessions].sort((a, b) => {
+    const diff = sessionUrgencyRank(a) - sessionUrgencyRank(b)
+    if (diff !== 0) return diff
+    return b.lastActiveAt - a.lastActiveAt || b.createdAt - a.createdAt
+  })
+}
+
+export function sortSubagentsByUrgency(subagents: RrSubagent[]): RrSubagent[] {
+  const rank = (agent: RrSubagent): number => {
+    if (agent.availability === 'busy') return 0
+    if (agent.availability === 'idle') return 1
+    return 2
+  }
+  return [...subagents].sort((a, b) => {
+    const diff = rank(a) - rank(b)
+    if (diff !== 0) return diff
+    return b.lastActiveAt - a.lastActiveAt
+  })
+}
 
 export function shouldNotifyRr(message: Pick<RrMessage, 'msgId' | 'role'>, seen: Set<string>): boolean {
   return message.role === 'assistant' && !seen.has(message.msgId)
@@ -208,9 +292,11 @@ export function buildRrLaunchPrompt(session: RrSession): string {
 5. 子 Agent 收到 [RR_MSG · AGENT_TASK] 后，以 report_task_progress 上报进度，最终必须调用 complete_subagent_task 回流结果并释放 busy 锁，然后继续 wait_message。
 
 AFK 自动化（可选）：
-- 启动：\`bash Start/rr-orchestrator.sh\` 或 \`npm run rr:orchestrator -- run\`（需 ~/.cursor/afk/ACTIVE）
+- 状态根：~/.rr-cursor/afk（不是 ~/.cursor/afk / ~/.codex/afk）
+- 启动：\`pc afk orchestrator start\` 或 Hub POST /api/ui/rr/afk/orchestrator/start
 - Orchestrator 通过 Hub POST 注入任务（等同本面板发送）；CLI 负责读 TODO/CRITERIA 并续跑
 - 与 Cursor /loop 兼容：stdout 输出 RR_ORCH_TICK sentinel 供会话内 loop 拾取
+- Mode=go 时禁止新建/dispatch Subagent 开池；单主无限 MCP 把活干完
 
 所有调用都必须使用 rr-chat 的结构化 MCP 工具。`
 }

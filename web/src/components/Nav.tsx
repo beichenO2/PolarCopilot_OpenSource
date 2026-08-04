@@ -6,6 +6,7 @@ const links = [
   { to: '/start-agent', label: 'Start Agent' },
   { to: '/prompts', label: 'Agent Control' },
   { to: '/rr', label: 'Rr' },
+  { to: '/afk', label: 'AFK' },
   { to: '/ssot', label: 'SSoT' },
   { to: '/prolusion', label: 'Prolusion' },
   { to: '/yolo', label: 'YOLO' },

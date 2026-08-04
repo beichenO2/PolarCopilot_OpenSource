@@ -1,6 +1,19 @@
 import type { Agent, Prompt, HubEvent, Task, AgentsSummary, ServiceHealth, ProjectData, EcoService, PortEntry, DeviceResource } from '../types/hub'
 import type { PilotStatusSummary, LobsterStatus, LobsterEvent } from '../types/pilot-status'
-import type { RrSession, RrSessionDetail, RrSubagent, RrSpawnQueueBatch, RrSpawnQueueStatus, RrAfkStatus, RrAfkOneClickResult } from '../types/rr'
+import type {
+  RrSession,
+  RrSessionDetail,
+  RrSubagent,
+  RrSpawnQueueBatch,
+  RrSpawnQueueStatus,
+  RrAfkStatus,
+  RrAfkOneClickResult,
+  RrAfkGrantResult,
+  RrAfkSummary,
+  RrAfkTaskIndex,
+  RrAfkDecisionsReportItem,
+  RrOrchestratorConfig,
+} from '../types/rr'
 
 export interface EvolutionSignal {
   id: string
@@ -442,7 +455,13 @@ export const api = {
     spawnQueueBatch: (batchId: string) => get<{ batch: RrSpawnQueueBatch; queue: RrSpawnQueueStatus }>(`/api/ui/rr/spawn-queue/${batchId}`),
     subagents: (sessionId?: string) => get<{ subagents: RrSubagent[] }>(`/api/ui/rr/subagents${sessionId ? `?sessionId=${encodeURIComponent(sessionId)}` : ''}`),
     runtime: () => get<{ defaultWorkspace: string; orchestratorProjectRoot: string; spawnGapMs?: number }>('/api/ui/rr/runtime'),
-    afkStatus: () => get<RrAfkStatus>('/api/ui/rr/afk/status'),
+    orchestratorConfig: () => get<RrOrchestratorConfig>('/api/ui/rr/config'),
+    updateOrchestratorConfig: (data: RrOrchestratorConfig) => patch<RrOrchestratorConfig>('/api/ui/rr/config', data),
+    afkStatus: (projectRoot?: string) => {
+      const query = projectRoot ? `?projectRoot=${encodeURIComponent(projectRoot)}` : ''
+      return get<RrAfkStatus>(`/api/ui/rr/afk/status${query}`)
+    },
+    afkSummary: () => get<{ ok: true; summaries: RrAfkSummary[]; index: RrAfkTaskIndex }>('/api/ui/rr/afk/summary'),
     afkArm: (data?: {
       taskDir?: string
       taskSlug?: string
@@ -461,9 +480,35 @@ export const api = {
       projectRoot?: string
       spawnIfNeeded?: boolean
       startOrchestrator?: boolean
+      mode?: 'start' | 'solo' | 'go'
     }) => post<RrAfkOneClickResult>('/api/ui/rr/afk/one-click', data ?? {}),
+    afkPause: (taskId?: string) =>
+      post<{ ok: true; paused: RrAfkSummary[]; index: RrAfkTaskIndex }>('/api/ui/rr/afk/pause', taskId ? { taskId } : {}),
+    afkResume: (taskId?: string) =>
+      post<{ ok: true; resumed: RrAfkSummary[]; index: RrAfkTaskIndex }>('/api/ui/rr/afk/resume', taskId ? { taskId } : {}),
+    afkTick: (data?: { taskId?: string; reason?: string }) =>
+      post<{ ok: true; taskId: string; sessionId: string; messageId: string }>('/api/ui/rr/afk/tick', data ?? {}),
+    afkGrantTemporaryPaths: (taskId: string, paths: string[]) =>
+      post<{ ok: true } & RrAfkGrantResult>(`/api/ui/rr/afk/${encodeURIComponent(taskId)}/grant-temporary-paths`, {
+        paths,
+        confirmed: true,
+      }),
+    afkReport: () => get<{ ok: true; items: RrAfkDecisionsReportItem[] }>('/api/ui/rr/afk/report'),
     afkOrchestratorStart: () => post<{ ok: true; enabled: boolean; running: boolean }>('/api/ui/rr/afk/orchestrator/start'),
     afkOrchestratorHalt: () => post<{ ok: true; enabled: boolean; running: boolean }>('/api/ui/rr/afk/orchestrator/halt'),
+    afkVnextTasks: () =>
+      get<{
+        ok: true
+        active: Array<Record<string, unknown>>
+        tasks: Array<Record<string, unknown>>
+        exec_concurrency_hint: number
+      }>('/api/ui/rr/afk/vnext/tasks'),
+    afkVnextCreate: (data: { goal: string; projectRoot: string; mode?: 'start' | 'solo' }) =>
+      post<{ ok: true; task: Record<string, unknown> }>('/api/ui/rr/afk/vnext/tasks', data),
+    afkVnextCompletion: (taskId: string) =>
+      get<{ gate_ok: boolean; gaps: unknown[]; required_total: number; required_pass: number }>(
+        `/api/ui/rr/afk/vnext/tasks/${encodeURIComponent(taskId)}/completion`,
+      ),
   },
   pilotStatus: {
     summary: () => get<PilotStatusSummary>('/api/ui/pilot-status'),

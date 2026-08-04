@@ -1,0 +1,4 @@
+32:  --resume [chatId]            Select a session to resume (default: false)
+33:  --continue                   Continue previous session (default: false)
+82:  create-chat                  Create a new empty chat and return its ID
+87:  resume                       Resume the latest chat session

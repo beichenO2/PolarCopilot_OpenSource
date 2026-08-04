@@ -19,8 +19,10 @@ export function buildRrLaunchPrompt(session: Pick<RrSession, 'sessionId' | 'name
 5. 子 Agent 收到 [RR_MSG · AGENT_TASK] 后，以 report_task_progress 上报进度，最终必须调用 complete_subagent_task 回流结果并释放 busy 锁，然后继续 wait_message。
 
 AFK 自动化（可选）：
-- 启动：npm run rr:orchestrator -- start（需 ~/.cursor/afk/ACTIVE）
+- 状态根：~/.rr-cursor/afk（不是 ~/.cursor/afk / ~/.codex/afk）
+- 启动：pc afk orchestrator start 或 Hub POST /api/ui/rr/afk/orchestrator/start
 - Orchestrator 通过 Hub POST 注入任务（等同 Hub 面板发送）
+- Mode=go（禁止新 Subagent）时：禁止 list_subagents / dispatch_subagent_task 开池；单主把活干完
 
 所有调用都必须使用 rr-chat 的结构化 MCP 工具。`;
 }

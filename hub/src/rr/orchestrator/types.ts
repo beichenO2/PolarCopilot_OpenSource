@@ -1,3 +1,4 @@
+import type { RrAfkSummary } from '../afk/index.js';
 import type { RrMessage, RrSession, RrSubagentView } from '../types.js';
 
 export interface OrchestratorConfig {
@@ -20,6 +21,31 @@ export interface OrchestratorConfig {
   injectPrefix: string;
   statePath: string;
   logPath: string;
+  maintainSubagentPool?: boolean;
+  allowNewSubagents?: boolean;
+  desiredSubagents?: number;
+  managedSubagentIds?: string[];
+  subagentRecoveryCooldownMs?: number;
+  subagentPruneAfterMs?: number;
+  subagentHeadless?: boolean;
+  /** When false, skip PolarBudget pause/resume shedder on each tick. Default true. */
+  budgetShedder?: boolean;
+  /** Optional allowlist of PolarProcess service ids that may be paused under critical pressure. */
+  budgetPausableServiceIds?: string[];
+  budgetMaxPausePerTick?: number;
+  budgetMaxResumePerTick?: number;
+}
+
+/** Per-AFK-task inject/cooldown state — keyed by taskId in OrchestratorState.tasks */
+export interface TaskOrchestratorState {
+  loopCount: number;
+  lastInjectedAt: number | null;
+  lastInjectedHash: string | null;
+  lastSessionId: string | null;
+  lastAction: string | null;
+  injectionCount: number;
+  injectionWindowStart: number;
+  paused: boolean;
 }
 
 export interface OrchestratorState {
@@ -33,6 +59,18 @@ export interface OrchestratorState {
   lastSessionId: string | null;
   lastAction: string | null;
   paused: boolean;
+  /** Per-task orchestrator slice — enables unlimited parallel AFK tasks */
+  tasks?: Record<string, TaskOrchestratorState>;
+  managedSubagentIds: string[];
+  lastPoolRecoveryAt: Record<string, number>;
+  lastPoolAction: string | null;
+  pool: {
+    desired: number;
+    managed: number;
+    online: number;
+    waiting: number;
+    offline: number;
+  };
 }
 
 export interface AfkSnapshot {
@@ -43,6 +81,12 @@ export interface AfkSnapshot {
   criteriaText: string | null;
   todoText: string | null;
   maxLoops: number;
+  /** RR AFK summaries when ~/.rr-cursor/afk has task data */
+  summaries?: RrAfkSummary[];
+  /** Primary active or most-recent task summary */
+  primarySummary?: RrAfkSummary | null;
+  taskId?: string | null;
+  source?: 'rr-afk' | 'legacy';
 }
 
 export interface PlannerInput {
@@ -65,6 +109,7 @@ export type PlannerAction =
 export interface OrchestratorTick {
   at: number;
   sessionId: string;
+  taskId?: string | null;
   action: PlannerAction;
 }
 

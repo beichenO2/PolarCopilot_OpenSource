@@ -46,6 +46,12 @@ export interface RrSession {
   polarProcessServiceId?: string;
   activeTask?: RrActiveTask;
   compat?: RrXjCompatibility;
+  /** AFK task that owns this session (when spawned by AFK service). */
+  afkTaskId?: string;
+  /** Upstream task id for continuation / delegated ownership. */
+  ownerTaskId?: string;
+  /** Master rr session id for delegated subagent ownership. */
+  ownerMasterSessionId?: string;
 }
 
 export interface RrMessage {

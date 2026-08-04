@@ -1,0 +1,13 @@
+
+> polarcop-hub@0.5.1 test
+> vitest run --run tests/rr/afk-store.test.ts tests/rr/afk-api.test.ts tests/rr/budget-shedder.test.ts tests/rr/master-orchestrator-discipline.test.ts tests/rr/orchestrator-planner-afk.test.ts tests/rr/afk-service-ssot.test.ts
+
+
+ RUN  v4.1.2 ~/Polarisor/PolarCopilot/hub
+
+
+ Test Files  6 passed (6)
+      Tests  46 passed (46)
+   Start at  14:24:37
+   Duration  2.28s (transform 1.13s, setup 0ms, import 1.39s, tests 2.24s, environment 1ms)
+

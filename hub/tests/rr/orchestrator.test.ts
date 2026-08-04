@@ -10,8 +10,22 @@ import { RrFileStore } from '../../src/rr/store.js';
 import type { OrchestratorConfig } from '../../src/rr/orchestrator/types.js';
 
 describe('rr orchestrator planner', () => {
+  const envBackup = { ...process.env };
   const roots: string[] = [];
-  afterEach(() => roots.splice(0).forEach((root) => rmSync(root, { recursive: true, force: true })));
+  afterEach(() => {
+    process.env = { ...envBackup };
+    roots.splice(0).forEach((root) => rmSync(root, { recursive: true, force: true }));
+  });
+
+  function setupRoot(prefix: string): string {
+    const root = mkdtempSync(join(tmpdir(), prefix));
+    roots.push(root);
+    const rrAfkRoot = mkdtempSync(join(tmpdir(), 'rr-afk-isolated-'));
+    roots.push(rrAfkRoot);
+    process.env.RR_AFK_ROOT = rrAfkRoot;
+    process.env.RR_AFK_LEGACY_ROOT = join(root, 'afk');
+    return root;
+  }
 
   function baseConfig(root: string, projectRoot: string): OrchestratorConfig {
     return {
@@ -38,8 +52,7 @@ describe('rr orchestrator planner', () => {
   }
 
   it('returns noop when AFK is not armed', () => {
-    const root = mkdtempSync(join(tmpdir(), 'rr-orch-'));
-    roots.push(root);
+    const root = setupRoot('rr-orch-');
     const store = new RrFileStore(join(root, 'chat'));
     const main = store.register({ name: 'Main' }).session;
     store.updateSession(main.sessionId, { agentStatus: 'ready' });
@@ -55,8 +68,7 @@ describe('rr orchestrator planner', () => {
   });
 
   it('injects next todo when AFK active and master is waiting idle', () => {
-    const root = mkdtempSync(join(tmpdir(), 'rr-orch-'));
-    roots.push(root);
+    const root = setupRoot('rr-orch-');
     mkdirSync(join(root, 'afk'), { recursive: true });
     writeFileSync(join(root, 'afk', 'ACTIVE'), '', 'utf8');
     writeFileSync(join(root, 'TODO.md'), '- [ ] 修复登录偶发 500\n- [ ] 补测试\n', 'utf8');
@@ -88,8 +100,7 @@ describe('rr orchestrator planner', () => {
   });
 
   it('dispatches research todo to idle subagent when enabled', () => {
-    const root = mkdtempSync(join(tmpdir(), 'rr-orch-'));
-    roots.push(root);
+    const root = setupRoot('rr-orch-');
     mkdirSync(join(root, 'afk'), { recursive: true });
     writeFileSync(join(root, 'afk', 'ACTIVE'), '', 'utf8');
     writeFileSync(join(root, 'TODO.md'), '- [ ] 调研 rr 路由性能\n- [ ] 实现修复\n', 'utf8');
@@ -134,8 +145,7 @@ describe('rr orchestrator planner', () => {
   });
 
   it('loads merged config paths', () => {
-    const root = mkdtempSync(join(tmpdir(), 'rr-orch-'));
-    roots.push(root);
+    const root = setupRoot('rr-orch-');
     writeFileSync(join(root, '.rr-orchestrator.json'), JSON.stringify({ idleInjectDelayMs: 777 }), 'utf8');
     const config = loadConfig(root);
     expect(config.idleInjectDelayMs).toBe(777);
@@ -143,8 +153,7 @@ describe('rr orchestrator planner', () => {
   });
 
   it('does not wake when inbox already has pending messages (offline flood guard)', () => {
-    const root = mkdtempSync(join(tmpdir(), 'rr-orch-'));
-    roots.push(root);
+    const root = setupRoot('rr-orch-');
     mkdirSync(join(root, 'afk'), { recursive: true });
     writeFileSync(join(root, 'afk', 'ACTIVE'), '', 'utf8');
     writeFileSync(join(root, 'TODO.md'), '- [ ] keep going\n', 'utf8');
@@ -173,8 +182,7 @@ describe('rr orchestrator planner', () => {
   });
 
   it('does not inject while agent is developing even if status is online', () => {
-    const root = mkdtempSync(join(tmpdir(), 'rr-orch-'));
-    roots.push(root);
+    const root = setupRoot('rr-orch-');
     mkdirSync(join(root, 'afk'), { recursive: true });
     writeFileSync(join(root, 'afk', 'ACTIVE'), '', 'utf8');
     writeFileSync(join(root, 'TODO.md'), '- [ ] keep going\n', 'utf8');
@@ -203,8 +211,7 @@ describe('rr orchestrator planner', () => {
   });
 
   it('does not inject when online but not waiting', () => {
-    const root = mkdtempSync(join(tmpdir(), 'rr-orch-'));
-    roots.push(root);
+    const root = setupRoot('rr-orch-');
     mkdirSync(join(root, 'afk'), { recursive: true });
     writeFileSync(join(root, 'afk', 'ACTIVE'), '', 'utf8');
     writeFileSync(join(root, 'TODO.md'), '- [ ] keep going\n', 'utf8');
@@ -233,8 +240,7 @@ describe('rr orchestrator planner', () => {
   });
 
   it('cools down repeated offline wakes', () => {
-    const root = mkdtempSync(join(tmpdir(), 'rr-orch-'));
-    roots.push(root);
+    const root = setupRoot('rr-orch-');
     mkdirSync(join(root, 'afk'), { recursive: true });
     writeFileSync(join(root, 'afk', 'ACTIVE'), '', 'utf8');
     writeFileSync(join(root, 'TODO.md'), '- [ ] keep going\n', 'utf8');
@@ -276,9 +282,36 @@ describe('rr orchestrator planner', () => {
     expect(second.kind).toBe('noop');
   });
 
+  it('wakes an offline developing master instead of treating stale status as busy', () => {
+    const root = setupRoot('rr-orch-offline-developing-');
+    mkdirSync(join(root, 'afk'), { recursive: true });
+    writeFileSync(join(root, 'afk', 'ACTIVE'), '', 'utf8');
+    writeFileSync(join(root, 'TODO.md'), '- [ ] resume work\n', 'utf8');
+    const store = new RrFileStore(join(root, 'chat'));
+    const main = store.register({ name: 'Main' }).session;
+    const config = baseConfig(root, root);
+    const now = Date.now();
+    const action = planNextAction({
+      config,
+      state: defaultState(),
+      afk: readAfkSnapshot(config),
+      session: {
+        ...main,
+        waiting: false,
+        status: 'offline',
+        online: false,
+        lastActiveAt: now - 60_000,
+        pendingMessages: 0,
+        agentStatus: 'developing',
+      },
+      history: [],
+      subagents: [],
+    }, now);
+    expect(action.kind).toBe('wake');
+  });
+
   it('toggle flag gates enabled state', () => {
-    const root = mkdtempSync(join(tmpdir(), 'rr-orch-toggle-'));
-    roots.push(root);
+    const root = setupRoot('rr-orch-toggle-');
     const flag = join(root, 'enabled');
     writeFileSync(flag, '1\n', 'utf8');
     expect(existsSync(flag)).toBe(true);

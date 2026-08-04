@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import * as z from 'zod/v4';
+import { assertCanDispatchSubagent, assertCanListSubagents } from './afk/dispatch-guard.js';
 import { makePollTick } from './poll-ticks.js';
 import type { RrFileStore } from './store.js';
 import type { RrMessage, RrResumeContext, RrSubagentView } from './types.js';
@@ -122,8 +123,12 @@ export function createRrMcpServer(store: RrFileStore): McpServer {
     description: 'List other local Rr sessions whose subagent switch is on, including idle, busy, offline, active task and progress state.',
     inputSchema: { sessionId: z.string().optional() },
   }, async ({ sessionId }) => {
-    try { return text(renderSubagents(store.listSubagents(sessionId))); }
-    catch (error) { return failure(error); }
+    try {
+      if (sessionId) {
+        assertCanListSubagents(store.getSession(sessionId));
+      }
+      return text(renderSubagents(store.listSubagents(sessionId)));
+    } catch (error) { return failure(error); }
   });
 
   server.registerTool('dispatch_subagent_task', {
@@ -135,6 +140,7 @@ export function createRrMcpServer(store: RrFileStore): McpServer {
     },
   }, async ({ sessionId, targetSessionId, content }) => {
     try {
+      assertCanDispatchSubagent(store.getSession(sessionId));
       const task = store.dispatchSubagentTask(sessionId, targetSessionId, content);
       return text(`Task dispatched. taskId=${task.taskId} targetSessionId=${targetSessionId}. Continue your own work or call wait_message for the [RR_MSG · AGENT_RESULT].`);
     } catch (error) { return failure(error); }

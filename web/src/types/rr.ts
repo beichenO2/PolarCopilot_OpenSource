@@ -101,6 +101,62 @@ export interface RrAfkTodoProgress {
   pendingItems: string[]
 }
 
+export type RrAfkTaskStatus =
+  | 'PLANNING'
+  | 'READY'
+  | 'RUNNING'
+  | 'UNIT_DONE'
+  | 'READY_TO_MERGE'
+  | 'DONE'
+  | 'PAUSED'
+  | 'NEEDS_HUMAN'
+  | 'BLOCKED'
+
+export type RrAfkMode = 'start' | 'solo' | 'go'
+
+export interface RrAfkPermissionRequest {
+  kind: 'temporary_write_paths' | string
+  unit: string
+  plan_revision: number
+  paths: string[]
+}
+
+export interface RrAfkSummary {
+  task_id: string
+  status: RrAfkTaskStatus
+  master_session_id: string | null
+  current_unit: string | null
+  plan_revision: number
+  loop: number
+  allowlist: string[]
+  permission_request: RrAfkPermissionRequest | null
+  last_command: string | null
+  last_verification: unknown
+  human_action_hint: string | null
+  updated_at: string
+  heartbeat?: { automation_id: string | null }
+  project_root?: string
+  mode?: RrAfkMode
+  /** Task-scoped Subagent policy; go forces false without stomping global panel. */
+  allow_new_subagents?: boolean
+}
+
+export interface RrAfkTaskIndex {
+  active_tasks: string[]
+  updated_at: string
+}
+
+export interface RrAfkActiveTaskStatus {
+  taskId: string
+  masterSessionId: string | null
+  status: RrAfkTaskStatus
+  loopCount: number
+  maxLoops: number
+  paused: boolean
+  done: boolean
+  projectRoot: string
+}
+
 export interface RrAfkStatus {
   ok: boolean
   active: boolean
@@ -109,6 +165,10 @@ export interface RrAfkStatus {
   maxLoops: number
   loopCount: number
   taskDir: string | null
+  /** Primary task compat mirror; use activeTasks / index.active_tasks for the full set */
+  taskId: string | null
+  /** All concurrently active AFK tasks with dedicated master bindings */
+  activeTasks: RrAfkActiveTaskStatus[]
   todo: RrAfkTodoProgress
   criteria: { count: number; summary: string[] }
   orchestrator: {
@@ -128,18 +188,22 @@ export interface RrAfkStatus {
     loopCount: number
     lastAction: string | null
   }
+  summaries: RrAfkSummary[]
+  index: RrAfkTaskIndex
+}
+
+export interface RrAfkArmedResult {
+  taskId: string
+  taskDir: string
+  maxLoops: number
+  masterSessionId: string
+  activated: boolean
 }
 
 export interface RrAfkOneClickResult {
   ok: true
   sessionId: string
-  armed: {
-    armed: true
-    afkRoot: string
-    taskDir: string | null
-    maxLoops: number
-    masterSessionId: string | null
-  }
+  armed: RrAfkArmedResult
   orchestrator: {
     enabled: boolean
     running: boolean
@@ -148,3 +212,19 @@ export interface RrAfkOneClickResult {
   status: RrAfkStatus
 }
 
+export interface RrAfkGrantResult {
+  taskId: string
+  status: string
+  grantedPaths: string[]
+  usesRemaining: number
+}
+
+export interface RrAfkDecisionsReportItem {
+  taskId: string
+  excerpt: string
+  lineCount: number
+}
+
+export interface RrOrchestratorConfig {
+  allowNewSubagents: boolean
+}

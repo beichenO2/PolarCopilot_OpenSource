@@ -3,13 +3,31 @@ import type pino from 'pino';
 import {
   armAfk,
   configureMasterSession,
+  doneAfk,
+  grantTemporaryPaths,
   haltAfkOrchestrator,
   oneClickAfk,
+  pauseAfk,
   readAfkStatus,
+  readAfkSummaryList,
+  readDecisionsReport,
+  resumeAfk,
+  setTaskHeartbeat,
   startAfkOrchestrator,
+  tickAfk,
 } from './afk-service.js';
+import {
+  AFK_MODE_GO_FORBIDS_DISPATCH,
+  AFK_MODE_GO_FORBIDS_LIST_SUBAGENTS,
+  assertCanDispatchSubagent,
+} from './afk/dispatch-guard.js';
+import { AfkCompletionGateError } from './afk/vnext/bridge.js';
+import { openAfkDb } from './afk/vnext/db.js';
+import { listActiveTasks } from './afk/vnext/store.js';
+import { createWebTask, resolveExecConcurrency } from './afk/vnext/cli-adapter.js';
+import { evaluateCompletion } from './afk/vnext/completion-gate.js';
 import { defaultRrWorkspace } from './cursor-spawn.js';
-import { loadConfig } from './orchestrator/config.js';
+import { globalConfigPath, loadConfig, patchGlobalConfig, readAllowNewSubagents } from './orchestrator/config.js';
 import { readOrchestratorHealth } from './orchestrator/health.js';
 import { CursorSpawnQueue } from './spawn-queue.js';
 import type { RrFileStore } from './store.js';
@@ -19,9 +37,11 @@ export interface RrRouterDeps {
   store: RrFileStore;
   logger?: pino.Logger;
   storeBridgeIntervalMs?: number;
+  orchestratorConfigPath?: string;
 }
 
-function errorStatus(error: unknown): number {
+export function errorStatus(error: unknown): number {
+  if (error instanceof AfkCompletionGateError) return 409;
   const message = error instanceof Error ? error.message : String(error);
   if (message === 'session_not_found') return 404;
   if (message === 'session_deleted') return 410;
@@ -29,12 +49,27 @@ function errorStatus(error: unknown): number {
   if (message === 'cursor_cli_not_found' || message === 'cursor_spawn_failed') return 503;
   if (message.startsWith('polarprocess_')) return 503;
   if (message === 'batch_not_found') return 404;
-  if (message === 'afk_already_active' || message === 'no_master_session') return 409;
+  if (message === 'afk_already_active' || message === 'no_master_session' || message === 'session_bound_to_other_task' || message === 'afk_budget_capacity') return 409;
+  if (message === 'afk_task_not_found') return 404;
+  if (message.startsWith('afk_completion_gate_failed')) return 409;
+  if (message === 'permission_not_requested') return 409;
+  if (message === 'invalid_confirmation') return 400;
+  if (message === AFK_MODE_GO_FORBIDS_DISPATCH || message === AFK_MODE_GO_FORBIDS_LIST_SUBAGENTS) return 403;
   if (message.startsWith('invalid_') || message === 'target_not_subagent') return 400;
   return 500;
 }
 
-export function createRrRouter({ store, logger, storeBridgeIntervalMs = 1_000 }: RrRouterDeps): Router {
+export function allowedSubagentCount(requested: number, allowNewSubagents: boolean): number {
+  if (!allowNewSubagents) return 0;
+  return Math.max(0, Math.min(4, requested));
+}
+
+export function createRrRouter({
+  store,
+  logger,
+  storeBridgeIntervalMs = 1_000,
+  orchestratorConfigPath = globalConfigPath(),
+}: RrRouterDeps): Router {
   const router = Router();
   const sseClients = new Set<Response>();
   let lastDigest = '';
@@ -79,6 +114,16 @@ export function createRrRouter({ store, logger, storeBridgeIntervalMs = 1_000 }:
   const handleError = (res: Response, error: unknown) => {
     const message = error instanceof Error ? error.message : String(error);
     logger?.error({ err: message }, 'rr route error');
+    if (error instanceof AfkCompletionGateError) {
+      res.status(409).json({
+        ok: false,
+        error: 'afk_completion_gate_failed',
+        gaps: error.report.gaps,
+        required_total: error.report.required_total,
+        required_pass: error.report.required_pass,
+      });
+      return;
+    }
     res.status(errorStatus(error)).json({ ok: false, error: message });
   };
 
@@ -148,6 +193,7 @@ export function createRrRouter({ store, logger, storeBridgeIntervalMs = 1_000 }:
     try {
       const body = req.body as { targetSessionId?: string; content?: string };
       if (!body.targetSessionId || !body.content) throw new Error('invalid_dispatch');
+      assertCanDispatchSubagent(store.getSession(req.params.sessionId));
       const task = store.dispatchSubagentTask(req.params.sessionId, body.targetSessionId, body.content);
       notify('rr_message_created', { sessionId: body.targetSessionId, taskId: task.taskId });
       res.status(201).json({ task });
@@ -228,7 +274,10 @@ export function createRrRouter({ store, logger, storeBridgeIntervalMs = 1_000 }:
       };
       const stamp = body.stamp?.trim() || new Date().toLocaleTimeString('zh-CN', { hour12: false });
       const workspace = body.workspace;
-      const subCount = Math.max(0, Math.min(4, body.subCount ?? 2));
+      const subCount = allowedSubagentCount(
+        body.subCount ?? 2,
+        readAllowNewSubagents(orchestratorConfigPath),
+      );
       const batch = spawnQueue.createBatch();
 
       const mainResult = store.register({
@@ -321,6 +370,23 @@ export function createRrRouter({ store, logger, storeBridgeIntervalMs = 1_000 }:
     } catch (error) { handleError(res, error); }
   });
 
+  router.get('/ui/rr/config', (_req, res) => {
+    try {
+      res.json({ allowNewSubagents: readAllowNewSubagents(orchestratorConfigPath) });
+    } catch (error) { handleError(res, error); }
+  });
+
+  router.patch('/ui/rr/config', (req, res) => {
+    try {
+      const body = req.body as { allowNewSubagents?: unknown };
+      if (typeof body.allowNewSubagents !== 'boolean') throw new Error('invalid_allow_new_subagents');
+      patchGlobalConfig({ allowNewSubagents: body.allowNewSubagents }, orchestratorConfigPath);
+      const config = { allowNewSubagents: readAllowNewSubagents(orchestratorConfigPath) };
+      notify('rr_orchestrator_config_updated', config);
+      res.json(config);
+    } catch (error) { handleError(res, error); }
+  });
+
   router.get('/ui/rr/orchestrator/health', (req, res) => {
     try {
       const projectRoot = typeof req.query.projectRoot === 'string' ? req.query.projectRoot : undefined;
@@ -335,7 +401,162 @@ export function createRrRouter({ store, logger, storeBridgeIntervalMs = 1_000 }:
     } catch (error) { handleError(res, error); }
   });
 
-  router.post('/ui/rr/afk/arm', (req, res) => {
+  router.get('/ui/rr/codex-afk', (_req, res) => {
+    res.status(410).json({
+      ok: false,
+      error: 'codex_afk_removed',
+      replacement: '/api/ui/rr/afk/summary',
+    });
+  });
+
+  router.post('/ui/rr/codex-afk/:taskId/grant-temporary-paths', (_req, res) => {
+    res.status(410).json({
+      ok: false,
+      error: 'codex_afk_removed',
+      replacement: '/api/ui/rr/afk/:taskId/grant-temporary-paths',
+    });
+  });
+
+  router.get('/ui/rr/afk/summary', (_req, res) => {
+    try {
+      res.json({ ok: true, ...readAfkSummaryList() });
+    } catch (error) { handleError(res, error); }
+  });
+
+  router.post('/ui/rr/afk/pause', (req, res) => {
+    try {
+      const body = req.body as { taskId?: string };
+      const result = pauseAfk(body.taskId);
+      notify('rr_afk_updated', { action: 'pause', ...result });
+      res.json({ ok: true, ...result });
+    } catch (error) { handleError(res, error); }
+  });
+
+  router.post('/ui/rr/afk/resume', async (req, res) => {
+    try {
+      const body = req.body as { taskId?: string; force?: boolean };
+      const result = await resumeAfk(body.taskId, { force: body.force });
+      notify('rr_afk_updated', { action: 'resume', ...result });
+      res.json({ ok: true, ...result });
+    } catch (error) { handleError(res, error); }
+  });
+
+  router.post('/ui/rr/afk/done', (req, res) => {
+    try {
+      const body = req.body as { taskId?: string };
+      if (!body.taskId || typeof body.taskId !== 'string') throw new Error('invalid_task_id');
+      const result = doneAfk(body.taskId);
+      notify('rr_afk_updated', { action: 'done', ...result });
+      res.json({ ok: true, ...result });
+    } catch (error) { handleError(res, error); }
+  });
+
+  /** AFK vNext control-plane (SQLite) — UI should prefer these over sessionId-centric views. */
+  router.get('/ui/rr/afk/vnext/tasks', (_req, res) => {
+    try {
+      const db = openAfkDb();
+      try {
+        const active = listActiveTasks(db);
+        const tasks = db
+          .prepare(
+            'SELECT task_id, goal, project_root, surface, status, mode, updated_at FROM tasks ORDER BY updated_at DESC LIMIT 100',
+          )
+          .all();
+        res.json({
+          ok: true,
+          active,
+          tasks,
+          exec_concurrency_hint: resolveExecConcurrency(null),
+          budget_note: 'budget_unavailable→exec_concurrency=1',
+        });
+      } finally {
+        db.close();
+      }
+    } catch (error) {
+      handleError(res, error);
+    }
+  });
+
+  router.post('/ui/rr/afk/vnext/tasks', (req, res) => {
+    try {
+      const body = req.body as { goal?: string; projectRoot?: string; mode?: 'start' | 'solo' };
+      if (!body.goal || !body.projectRoot) throw new Error('invalid_task_create');
+      const db = openAfkDb();
+      try {
+        const task = createWebTask(db, {
+          goal: body.goal,
+          projectRoot: body.projectRoot,
+          mode: body.mode ?? 'solo',
+        });
+        notify('rr_afk_updated', { action: 'vnext_create', task });
+        res.status(201).json({ ok: true, task });
+      } finally {
+        db.close();
+      }
+    } catch (error) {
+      handleError(res, error);
+    }
+  });
+
+  router.get('/ui/rr/afk/vnext/tasks/:taskId/completion', (req, res) => {
+    try {
+      const db = openAfkDb();
+      try {
+        const report = evaluateCompletion(db, req.params.taskId);
+        res.json({
+          gate_ok: report.ok,
+          gaps: report.gaps,
+          required_total: report.required_total,
+          required_pass: report.required_pass,
+        });
+      } finally {
+        db.close();
+      }
+    } catch (error) {
+      handleError(res, error);
+    }
+  });
+
+  router.post('/ui/rr/afk/:taskId/grant-temporary-paths', (req, res) => {
+    try {
+      const body = req.body as { paths?: unknown; confirmed?: unknown };
+      if (body.confirmed !== true) throw new Error('invalid_confirmation');
+      if (!Array.isArray(body.paths) || body.paths.some((path) => typeof path !== 'string')) {
+        throw new Error('invalid_permission_paths');
+      }
+      const result = grantTemporaryPaths(req.params.taskId, body.paths);
+      notify('rr_afk_updated', { action: 'grant', ...result });
+      res.json({ ok: true, ...result });
+    } catch (error) { handleError(res, error); }
+  });
+
+  router.post('/ui/rr/afk/tick', async (req, res) => {
+    try {
+      const body = req.body as { taskId?: string; reason?: string };
+      const result = await tickAfk(store, body.taskId, body.reason);
+      notify('rr_afk_updated', { action: 'tick', ...result });
+      res.json({ ok: true, ...result });
+    } catch (error) { handleError(res, error); }
+  });
+
+  router.post('/ui/rr/afk/set-heartbeat', (req, res) => {
+    try {
+      const body = req.body as { taskId?: string; automationId?: string };
+      if (!body.taskId || !body.automationId) throw new Error('invalid_heartbeat');
+      const summary = setTaskHeartbeat(body.taskId, body.automationId);
+      notify('rr_afk_updated', { action: 'heartbeat', summary });
+      res.json({ ok: true, summary });
+    } catch (error) { handleError(res, error); }
+  });
+
+  router.get('/ui/rr/afk/report', (_req, res) => {
+    try {
+      const items = readDecisionsReport();
+      res.json({ ok: true, items });
+    } catch (error) { handleError(res, error); }
+  });
+
+  router.post('/ui/rr/afk/arm', async (req, res) => {
     try {
       const body = req.body as {
         taskDir?: string
@@ -345,7 +566,7 @@ export function createRrRouter({ store, logger, storeBridgeIntervalMs = 1_000 }:
         projectRoot?: string
         masterSessionId?: string
       };
-      const result = armAfk(body);
+      const result = await armAfk(body);
       if (body.masterSessionId) configureMasterSession(body.masterSessionId, body.projectRoot);
       res.status(201).json({ ok: true, ...result });
     } catch (error) { handleError(res, error); }
@@ -363,10 +584,19 @@ export function createRrRouter({ store, logger, storeBridgeIntervalMs = 1_000 }:
         projectRoot?: string
         spawnIfNeeded?: boolean
         startOrchestrator?: boolean
+        mode?: string
       };
       const result = await oneClickAfk(store, {
         ...body,
         sessionId: body.sessionId ?? body.masterSessionId,
+      }, {
+        spawnEnqueue: (session, options) => spawnQueue.enqueue({
+          session,
+          workspace: options?.workspace,
+          headless: options?.headless,
+          waitUntilOnline: options?.waitUntilOnline ?? false,
+          label: options?.label ?? session.name,
+        }),
       });
       notify('rr_afk_updated', result.status);
       res.status(201).json(result);
@@ -408,4 +638,3 @@ export function createRrRouter({ store, logger, storeBridgeIntervalMs = 1_000 }:
 
   return router;
 }
-

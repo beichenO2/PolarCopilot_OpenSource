@@ -23,6 +23,17 @@ const DEFAULTS: OrchestratorConfig = {
   injectPrefix: '【Rr Orchestrator · AFK 续跑】',
   statePath: join(homedir(), '.rr-cursor', 'orchestrator', 'state.json'),
   logPath: join(homedir(), '.rr-cursor', 'orchestrator', 'events.jsonl'),
+  maintainSubagentPool: false,
+  allowNewSubagents: true,
+  desiredSubagents: 0,
+  managedSubagentIds: [],
+  subagentRecoveryCooldownMs: 45_000,
+  subagentPruneAfterMs: 15 * 60_000,
+  subagentHeadless: true,
+  budgetShedder: true,
+  budgetPausableServiceIds: [],
+  budgetMaxPausePerTick: 2,
+  budgetMaxResumePerTick: 2,
 };
 
 function expandHome(value: string): string {
@@ -47,6 +58,11 @@ function mergeConfig(base: OrchestratorConfig, patch: Record<string, unknown>): 
 
 export function globalConfigPath(): string {
   return join(homedir(), '.rr-cursor', 'orchestrator', 'config.json');
+}
+
+export function readAllowNewSubagents(path = globalConfigPath()): boolean {
+  if (!existsSync(path)) return DEFAULTS.allowNewSubagents !== false;
+  return readJson(path).allowNewSubagents !== false;
 }
 
 export function configPaths(projectRoot: string): string[] {
@@ -114,6 +130,13 @@ export function patchGlobalConfig(patch: Record<string, unknown>, path = globalC
       todoPaths: defaults.todoPaths,
       criteriaPaths: defaults.criteriaPaths,
       verifyCommands: defaults.verifyCommands,
+      maintainSubagentPool: defaults.maintainSubagentPool,
+      allowNewSubagents: defaults.allowNewSubagents,
+      desiredSubagents: defaults.desiredSubagents,
+      managedSubagentIds: defaults.managedSubagentIds,
+      subagentRecoveryCooldownMs: defaults.subagentRecoveryCooldownMs,
+      subagentPruneAfterMs: defaults.subagentPruneAfterMs,
+      subagentHeadless: defaults.subagentHeadless,
     };
   }
   writeFileSync(path, `${JSON.stringify({ ...base, ...patch }, null, 2)}\n`, 'utf8');
@@ -135,6 +158,13 @@ export function writeDefaultConfig(path = globalConfigPath()): OrchestratorConfi
       todoPaths: config.todoPaths,
       criteriaPaths: config.criteriaPaths,
       verifyCommands: [],
+      maintainSubagentPool: true,
+      allowNewSubagents: true,
+      desiredSubagents: 0,
+      managedSubagentIds: [],
+      subagentRecoveryCooldownMs: 45_000,
+      subagentPruneAfterMs: 15 * 60_000,
+      subagentHeadless: true,
     }, null, 2)}\n`, 'utf8');
   }
   return loadConfig(config.projectRoot);

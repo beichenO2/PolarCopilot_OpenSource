@@ -49,6 +49,34 @@ export class RrHubClient {
     return payload.message;
   }
 
+  /** Reconnect a Hub-owned Cursor process through the serialized spawn queue. */
+  async respawnCursor(sessionId: string, workspace: string, headless = true): Promise<unknown> {
+    return request(joinUrl(this.hubUrl, `/api/ui/rr/sessions/${encodeURIComponent(sessionId)}/spawn-cursor`), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ workspace, headless, waitUntilOnline: false }),
+    });
+  }
+
+  /** Create a new Cursor session; callers must explicitly mark it as a subagent. */
+  async createSubagent(name: string, workspace: string, headless = true): Promise<RrSession> {
+    const payload = await request<{ session: RrSession }>(joinUrl(this.hubUrl, '/api/ui/rr/sessions/spawn-cursor'), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name, role: 'general-purpose', workspace, headless, waitUntilOnline: false }),
+    });
+    const marked = await request<{ session: RrSession }>(joinUrl(this.hubUrl, `/api/ui/rr/sessions/${encodeURIComponent(payload.session.sessionId)}`), {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ isSubagent: true, title: name }),
+    });
+    return marked.session;
+  }
+
+  async deleteSession(sessionId: string): Promise<void> {
+    await request(joinUrl(this.hubUrl, `/api/ui/rr/sessions/${encodeURIComponent(sessionId)}`), { method: 'DELETE' });
+  }
+
   async dispatchTask(masterSessionId: string, targetSessionId: string, content: string): Promise<{ taskId: string }> {
     const payload = await request<{ task: { taskId: string } }>(
       joinUrl(this.hubUrl, `/api/ui/rr/sessions/${encodeURIComponent(masterSessionId)}/dispatch`),

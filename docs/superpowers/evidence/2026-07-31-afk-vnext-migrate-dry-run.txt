@@ -1,0 +1,190 @@
+{
+  "dryRun": true,
+  "sourceRoot": "~/.rr-cursor/afk",
+  "tasksSeen": 36,
+  "tasksImported": 0,
+  "skipped": [],
+  "conflicts": [],
+  "mapping": [
+    {
+      "legacyId": "knowlever-desktop-public-v1",
+      "status": "DONE",
+      "action": "would_import"
+    },
+    {
+      "legacyId": "polaride-desktop-product-v1",
+      "status": "DONE",
+      "action": "would_import"
+    },
+    {
+      "legacyId": "afk-multitask-parallel-20260731",
+      "status": "DONE",
+      "action": "would_import"
+    },
+    {
+      "legacyId": "budget-live-api-20260731",
+      "status": "DONE",
+      "action": "would_import"
+    },
+    {
+      "legacyId": "polaride-session-workflow-picker-v1",
+      "status": "DONE",
+      "action": "would_import"
+    },
+    {
+      "legacyId": "afk-f05-smoke-0",
+      "status": "DONE",
+      "action": "would_import"
+    },
+    {
+      "legacyId": "afk-f05-smoke-1",
+      "status": "DONE",
+      "action": "would_import"
+    },
+    {
+      "legacyId": "afk-f05-smoke-2",
+      "status": "DONE",
+      "action": "would_import"
+    },
+    {
+      "legacyId": "afk-f05-smoke-3",
+      "status": "DONE",
+      "action": "would_import"
+    },
+    {
+      "legacyId": "afk-f05-smoke-4",
+      "status": "DONE",
+      "action": "would_import"
+    },
+    {
+      "legacyId": "afk-f05-smoke-5",
+      "status": "DONE",
+      "action": "would_import"
+    },
+    {
+      "legacyId": "afk-f05-smoke-6",
+      "status": "DONE",
+      "action": "would_import"
+    },
+    {
+      "legacyId": "afk-f05-smoke-7",
+      "status": "DONE",
+      "action": "would_import"
+    },
+    {
+      "legacyId": "afk-f05-smoke-8",
+      "status": "DONE",
+      "action": "would_import"
+    },
+    {
+      "legacyId": "afk-f05-smoke-9",
+      "status": "DONE",
+      "action": "would_import"
+    },
+    {
+      "legacyId": "afk-fleet-live-0",
+      "status": "DONE",
+      "action": "would_import"
+    },
+    {
+      "legacyId": "afk-fleet-live-1",
+      "status": "DONE",
+      "action": "would_import"
+    },
+    {
+      "legacyId": "afk-fleet-live-2",
+      "status": "DONE",
+      "action": "would_import"
+    },
+    {
+      "legacyId": "afk-fleet-live-3",
+      "status": "DONE",
+      "action": "would_import"
+    },
+    {
+      "legacyId": "afk-fleet-live-4",
+      "status": "DONE",
+      "action": "would_import"
+    },
+    {
+      "legacyId": "afk-fleet-live-5",
+      "status": "DONE",
+      "action": "would_import"
+    },
+    {
+      "legacyId": "afk-fleet-live-6",
+      "status": "DONE",
+      "action": "would_import"
+    },
+    {
+      "legacyId": "afk-fleet-live-7",
+      "status": "DONE",
+      "action": "would_import"
+    },
+    {
+      "legacyId": "afk-fleet-live-8",
+      "status": "DONE",
+      "action": "would_import"
+    },
+    {
+      "legacyId": "afk-fleet-live-9",
+      "status": "DONE",
+      "action": "would_import"
+    },
+    {
+      "legacyId": "afk-fleet-smoke-0",
+      "status": "DONE",
+      "action": "would_import"
+    },
+    {
+      "legacyId": "afk-fleet-smoke-x",
+      "status": "DONE",
+      "action": "would_import"
+    },
+    {
+      "legacyId": "afk-multitask-smoke-20260731",
+      "status": "DONE",
+      "action": "would_import"
+    },
+    {
+      "legacyId": "hub-rr-ui-hierarchy-v1",
+      "status": "DONE",
+      "action": "would_import"
+    },
+    {
+      "legacyId": "knowlever-desktop-whitescreen-fix",
+      "status": "DONE",
+      "action": "would_import"
+    },
+    {
+      "legacyId": "live-biz-20260730-233406",
+      "status": "PAUSED",
+      "action": "would_import"
+    },
+    {
+      "legacyId": "p4-go-short-230738",
+      "status": "PAUSED",
+      "action": "would_import"
+    },
+    {
+      "legacyId": "p4-short-run-20260730230439",
+      "status": "PAUSED",
+      "action": "would_import"
+    },
+    {
+      "legacyId": "p4-short-run-20260730230738",
+      "status": "PAUSED",
+      "action": "would_import"
+    },
+    {
+      "legacyId": "qaflow-agentic-workflows-v1",
+      "status": "DONE",
+      "action": "would_import"
+    },
+    {
+      "legacyId": "zz-knowlever-desktop-public-v1",
+      "status": "PAUSED",
+      "action": "would_import"
+    }
+  ]
+}

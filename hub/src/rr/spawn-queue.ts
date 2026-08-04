@@ -1,11 +1,12 @@
 import { randomUUID } from 'node:crypto';
 import type pino from 'pino';
+import { canSpawnAgent } from './afk/budget-gate.js';
 import { spawnCursorAgent, stopCursorAgentForSession, type SpawnCursorAgentResult } from './cursor-spawn.js';
 import { sweepOrphanCursorAgents } from './cursor-agent-orphans.js';
 import type { RrFileStore } from './store.js';
 import type { RrSession } from './types.js';
 
-export type SpawnQueueJobStatus = 'pending' | 'spawning' | 'waiting_online' | 'done' | 'failed';
+export type SpawnQueueJobStatus = 'pending' | 'budget_waiting' | 'spawning' | 'waiting_online' | 'done' | 'failed';
 
 export interface SpawnQueueJob {
   jobId: string;
@@ -44,6 +45,12 @@ export interface CursorSpawnQueueOptions {
   offlineAfterMs?: number;
   logger?: pino.Logger;
   onUpdate?: (batch: SpawnQueueBatch | null, job: SpawnQueueJob | null) => void;
+  /** When true (default), refuse spawn under PolarBudget critical / lease denial. */
+  budgetGate?: boolean;
+  /** Max ms to poll PolarBudget 候补 when lease capacity full. Default 30min. 0 = fail fast. */
+  budgetWaitMs?: number;
+  /** Gap between jobs when enqueued as part of a spawn batch (fleet arm). Default 0. */
+  batchGapMs?: number;
 }
 
 function sleep(ms: number): Promise<void> {
@@ -57,6 +64,9 @@ export class CursorSpawnQueue {
   private readonly offlineAfterMs: number;
   private readonly logger?: pino.Logger;
   private readonly onUpdate?: CursorSpawnQueueOptions['onUpdate'];
+  private readonly budgetGate: boolean;
+  private readonly budgetWaitMs: number;
+  private readonly batchGapMs: number;
 
   private chain: Promise<void> = Promise.resolve();
   private pendingCount = 0;
@@ -72,6 +82,9 @@ export class CursorSpawnQueue {
     this.offlineAfterMs = options.offlineAfterMs ?? Number(process.env.RR_OFFLINE_MS ?? 90_000);
     this.logger = options.logger;
     this.onUpdate = options.onUpdate;
+    this.budgetGate = options.budgetGate !== false;
+    this.budgetWaitMs = options.budgetWaitMs ?? Number(process.env.RR_BUDGET_WAIT_MS ?? 1_800_000);
+    this.batchGapMs = options.batchGapMs ?? Number(process.env.RR_SPAWN_BATCH_GAP_MS ?? 0);
     void this.sweepOrphans('init');
   }
 
@@ -216,6 +229,7 @@ export class CursorSpawnQueue {
     }
     this.emit(batch ?? null, job);
 
+    let leaseId: string | undefined;
     try {
       if (this.cancelledSessionIds.has(input.session.sessionId) || !this.store.sessionExists(input.session.sessionId)) {
         job.status = 'failed';
@@ -228,6 +242,25 @@ export class CursorSpawnQueue {
       job.status = 'spawning';
       job.startedAt = Date.now();
       this.emit(batch ?? null, job);
+
+      if (this.budgetGate) {
+        job.status = 'budget_waiting';
+        this.emit(batch ?? null, job);
+        const gate = await canSpawnAgent({
+          estimatedJobs: 1,
+          acquireLease: true,
+          waitForLeaseMs: this.budgetWaitMs,
+          owner: `rr-spawn-queue:${input.session.sessionId.slice(0, 12)}`,
+        });
+        if (!gate.allowed) {
+          job.status = 'failed';
+          job.error = `budget_spawn_deferred:${gate.reason}`;
+          job.finishedAt = Date.now();
+          this.emit(batch ?? null, job);
+          throw new Error(`budget_spawn_deferred:${gate.reason}`);
+        }
+        leaseId = gate.leaseId;
+      }
 
       this.store.killCursorAgentForSession(input.session.sessionId);
 
@@ -292,10 +325,15 @@ export class CursorSpawnQueue {
       this.emit(batch ?? null, job);
       throw error;
     } finally {
+      if (typeof leaseId === 'string' && leaseId) {
+        const { releasePolarBudgetLease } = await import('./polar-budget.js');
+        await releasePolarBudgetLease(leaseId).catch(() => false);
+      }
       this.activeJob = null;
       this.pendingCount = Math.max(0, this.pendingCount - 1);
       this.touchBatch(batch);
-      if (this.gapMs > 0) await sleep(this.gapMs);
+      const gap = batch ? this.batchGapMs : this.gapMs;
+      if (gap > 0) await sleep(gap);
     }
   }
 }
