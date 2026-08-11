@@ -1236,7 +1236,7 @@ function createMcpServerForHub(deps: {
       description: 'Register this agent as the owner of a project. Call once at startup after hub_register. Ownership is used by the cross-project write protocol (Protocol H) to route XPCP requests to the correct agent.',
       inputSchema: {
         agent_id: z.string().min(1).describe('Agent ID (must match registered session)'),
-        project_name: z.string().min(1).describe('Short project name, e.g. "PolarClaw", "PolarCopilot"'),
+        project_name: z.string().min(1).describe('Short project name, e.g. "PolarCopilot", "PolarFlow"'),
         project_path: z.string().optional().describe('Absolute path to the project root'),
       },
     },
@@ -3414,8 +3414,8 @@ function mountUiRoutes(app: Express, db: HubDb, ctx: HubContext, publisher?: Bro
         capabilities?: string[];
       };
 
-      if (!agent_type || !['polarclaw', 'polarpilot', 'polarcopilot'].includes(agent_type)) {
-        res.status(400).json({ error: 'agent_type must be polarclaw, polarpilot, or polarcopilot' });
+      if (!agent_type || !['polarcopilot'].includes(agent_type)) {
+        res.status(400).json({ error: 'agent_type must be polarcopilot' });
         return;
       }
 
@@ -3597,84 +3597,6 @@ function mountUiRoutes(app: Express, db: HubDb, ctx: HubContext, publisher?: Bro
     aliveConnection?: import('express').Response;
     lastHeartbeat: number;
   }>();
-
-  // POST /api/agents/start - 一键启动 Agent 进程
-  app.post('/api/agents/start', async (req, res) => {
-    try {
-      const { agent_type, main_model, subagent_model } = req.body as {
-        agent_type?: string;
-        main_model?: string;
-        subagent_model?: string;
-      };
-
-      if (!agent_type || !['polarclaw', 'polarpilot'].includes(agent_type)) {
-        res.status(400).json({ error: 'agent_type must be polarclaw or polarpilot' });
-        return;
-      }
-
-      // 验证模型
-      const mainModel = main_model || 'qwen-3.6-plus';
-      const subagentModel = subagent_model || 'qwen-3.6-plus';
-      if (!MAIN_MODELS.find(m => m.id === mainModel)) {
-        res.status(400).json({ error: `invalid main_model: ${mainModel}` });
-        return;
-      }
-      if (!SUBAGENT_MODELS.find(m => m.id === subagentModel)) {
-        res.status(400).json({ error: `invalid subagent_model: ${subagentModel}` });
-        return;
-      }
-
-      const now = Date.now();
-      const agentId = `${agent_type}-${now}`;
-      const hubPort = process.env.PC_HUB_PORT || 8040;
-
-      // 确定项目路径
-      const projectPath = agent_type === 'polarclaw'
-        ? (process.env.POLARCLAW_PATH || `${process.env.HOME}/Polarisor/PolarClaw`)
-        : (process.env.POLARPILOT_PATH || `${process.env.HOME}/Polarisor/PolarPilot`);
-
-      // spawn 子进程
-      const { spawn } = await import('node:child_process');
-      const child = spawn('node', ['dist/main.js'], {
-        cwd: projectPath,
-        env: {
-          ...process.env,
-          HUB_WEB_URL: `http://127.0.0.1:${hubPort}`,
-          AGENT_ID: agentId,
-          MAIN_MODEL: mainModel,
-          SUBAGENT_MODEL: subagentModel,
-          MODE: 'hub-web',
-          HUB_WEB_ENABLED: '1',
-          HUB_MAIN_MODEL: mainModel,
-          HUB_SUBAGENT_MODEL: subagentModel,
-        },
-        detached: true,
-        stdio: 'ignore',
-      });
-
-      // 记录进程
-      agentProcesses.set(agentId, {
-        pid: child.pid!,
-        agentType: agent_type,
-        startedAt: now,
-        status: 'starting',
-        lastHeartbeat: now,
-      });
-
-      child.unref();
-      ctx.logger.info({ agent_id: agentId, pid: child.pid, agent_type }, 'agent process started');
-
-      res.json({
-        ok: true,
-        agent_id: agentId,
-        hub_port: Number(hubPort),
-        status: 'starting',
-      });
-    } catch (err) {
-      ctx.logger.error({ err }, 'agent start error');
-      res.status(500).json({ error: 'internal' });
-    }
-  });
 
   // GET /api/agents/:id/alive - SSE 长连接心跳
   app.get('/api/agents/:id/alive', (req, res) => {
@@ -4591,384 +4513,6 @@ function mountUiRoutes(app: Express, db: HubDb, ctx: HubContext, publisher?: Bro
   app.post('/api/ui/services/:id/stop', (req, res) => void proxySotServiceAction(req, res, 'stop'));
   app.post('/api/ui/services/:id/restart', (req, res) => void proxySotServiceAction(req, res, 'restart'));
 
-  // ── Pilot REST API (proxy to PolarClaw) ─────────────────────────────────
-  // Pilot is PolarClaw's autonomous project execution system.
-  // Hub proxies /api/pilot/* to PolarClaw's API for UI compatibility.
-  {
-    async function getPolarClawUrl(): Promise<string> {
-      try {
-        const resp = await fetch('http://127.0.0.1:4800/api/ports', { signal: AbortSignal.timeout(2000) });
-        const ports = (await resp.json()) as Array<{ port: number; service_name: string }>;
-        const mc = ports.find(p => p.service_name.includes('polarclaw'));
-        if (mc) return `http://127.0.0.1:${mc.port}`;
-      } catch { /* fall through */ }
-      return 'http://127.0.0.1:3910';
-    }
-    const pilotProxy = async (req: express.Request, res: express.Response) => {
-      try {
-        const base = await getPolarClawUrl();
-        const url = `${base}${req.originalUrl}`;
-        const opts: RequestInit = { method: req.method, headers: { 'Content-Type': 'application/json' }, signal: AbortSignal.timeout(30000) };
-        if (req.method !== 'GET' && req.method !== 'HEAD') {
-          opts.body = JSON.stringify(req.body);
-        }
-        const upstream = await fetch(url, opts);
-        const data = await upstream.json();
-        res.status(upstream.status).json(data);
-      } catch (err: any) {
-        ctx.logger.warn({ err }, 'pilot proxy to PolarClaw failed, returning empty');
-        if (req.method === 'GET' && req.originalUrl.endsWith('/projects')) {
-          res.json({ items: [] });
-        } else {
-          res.status(502).json({ error: 'PolarClaw unreachable', detail: err.message });
-        }
-      }
-    };
-
-    app.get('/api/pilot/projects', pilotProxy);
-    app.get('/api/pilot/projects/:id', pilotProxy);
-    app.post('/api/pilot/projects', pilotProxy);
-    app.post('/api/pilot/projects/:id/start', pilotProxy);
-    app.post('/api/pilot/projects/:id/cancel', pilotProxy);
-    app.post('/api/pilot/projects/:id/phases/:idx/status', pilotProxy);
-
-    // ── Pilot Status (read-only BFF for Lobster status dashboard) ────
-    {
-      interface LobsterStatusRow {
-        project_id: string;
-        project_name: string;
-        state: 'dormant' | 'active' | 'failed' | 'offline';
-        last_active_at: string | null;
-        current_node: string | null;
-        active_targets: number;
-        uptime_ms: number | null;
-        error?: string;
-      }
-      interface LobsterEventRow {
-        id: string;
-        timestamp: string;
-        type: string;
-        source_project: string;
-        target_project?: string;
-        severity: 'info' | 'warn' | 'error';
-        description: string;
-        dedup_key?: string;
-      }
-      interface PilotStatusCache {
-        projects: LobsterStatusRow[];
-        recent_events: LobsterEventRow[];
-        polarclaw_reachable: boolean;
-        last_refresh: string;
-        ts: number;
-      }
-
-      const KNOWN_PROJECTS = [
-        'AutoOffice', 'Clock', 'KnowLever', 'digist', 'tqsdk', 'macbook',
-      ];
-      const CACHE_TTL_MS = 30_000;
-      let statusCache: PilotStatusCache | null = null;
-
-      function offlineFallback(): PilotStatusCache {
-        return {
-          projects: KNOWN_PROJECTS.map(name => ({
-            project_id: name.toLowerCase(),
-            project_name: name,
-            state: 'offline' as const,
-            last_active_at: null,
-            current_node: null,
-            active_targets: 0,
-            uptime_ms: null,
-            error: 'PolarClaw SDK unreachable',
-          })),
-          recent_events: [],
-          polarclaw_reachable: false,
-          last_refresh: new Date().toISOString(),
-          ts: Date.now(),
-        };
-      }
-
-      async function refreshPilotStatus(): Promise<PilotStatusCache> {
-        if (statusCache && Date.now() - statusCache.ts < CACHE_TTL_MS) {
-          return statusCache;
-        }
-        try {
-          const base = await getPolarClawUrl();
-          const [statusResp, eventsResp] = await Promise.all([
-            fetch(`${base}/api/sdk/lobsters`, { signal: AbortSignal.timeout(5000) }),
-            fetch(`${base}/api/sdk/lobsters/events?limit=50`, { signal: AbortSignal.timeout(5000) }),
-          ]);
-          if (!statusResp.ok) throw new Error(`lobsters status ${statusResp.status}`);
-          const statusData = (await statusResp.json()) as { items?: LobsterStatusRow[] };
-          const projects = statusData.items ?? [];
-          let events: LobsterEventRow[] = [];
-          if (eventsResp.ok) {
-            const evData = (await eventsResp.json()) as { items?: LobsterEventRow[] };
-            events = evData.items ?? [];
-          }
-          statusCache = {
-            projects,
-            recent_events: events,
-            polarclaw_reachable: true,
-            last_refresh: new Date().toISOString(),
-            ts: Date.now(),
-          };
-        } catch {
-          statusCache = offlineFallback();
-        }
-        return statusCache;
-      }
-
-      app.get('/api/ui/pilot-status', async (_req, res) => {
-        const data = await refreshPilotStatus();
-        res.json(data);
-      });
-
-      app.get('/api/ui/pilot-status/:project', async (req, res) => {
-        const data = await refreshPilotStatus();
-        const proj = data.projects.find(
-          p => p.project_id === req.params.project || p.project_name === req.params.project,
-        );
-        if (!proj) {
-          res.status(404).json({ error: 'project_not_found', available: data.projects.map(p => p.project_id) });
-          return;
-        }
-        const events = data.recent_events.filter(
-          e => e.source_project === proj.project_id || e.target_project === proj.project_id
-              || e.source_project === proj.project_name || e.target_project === proj.project_name,
-        );
-        res.json({ ...proj, events });
-      });
-    }
-
-    // ── PolarClaw Chat Sessions (via Pending Prompts) ──────────────────
-    const polarClawSessions = new Map<string, {
-      model: string;
-      messages: Array<{ role: string; content: string }>;
-      createdAt: number;
-    }>();
-    const polarClawForwardedPrompts = new Set<string>();
-
-    setInterval(() => {
-      const cutoff = Date.now() - 4 * 3600_000;
-      const cutoffDate = new Date(cutoff);
-      for (const [k, v] of polarClawSessions) {
-        if (v.createdAt < cutoff) {
-          polarClawSessions.delete(k);
-        }
-      }
-      if (polarClawForwardedPrompts.size > 5000) polarClawForwardedPrompts.clear();
-
-      const staleDbSessions = db.select({ agentId: sessions.agentId })
-        .from(sessions)
-        .where(and(
-          sql`${sessions.agentId} LIKE 'polarclaw-chat-%'`,
-          lte(sessions.lastPingAt, cutoffDate),
-        ))
-        .all();
-      for (const s of staleDbSessions) {
-        db.update(uiPrompts)
-          .set({ answer: '[auto-closed: session expired]', answeredAt: new Date() })
-          .where(and(eq(uiPrompts.agentId, s.agentId), isNull(uiPrompts.answeredAt)))
-          .run();
-        db.delete(sessions).where(eq(sessions.agentId, s.agentId)).run();
-        notifyUiSse('session_ended', { session_id: s.agentId, reason: 'stale_cleanup' });
-      }
-    }, 600_000);
-
-    const polarClawModelsHandler = async (_req: express.Request, res: express.Response) => {
-      try {
-        const base = await getPolarClawUrl();
-        const resp = await fetch(`${base}/api/models`, { signal: AbortSignal.timeout(5000) });
-        if (!resp.ok) throw new Error(`PolarClaw /api/models: ${resp.status}`);
-        res.json(await resp.json());
-      } catch (err: any) {
-        ctx.logger.warn({ err: err.message }, 'polarclaw models fetch failed');
-        res.json({ models: ['auto'], intent_models: {} });
-      }
-    };
-    app.get('/api/ui/polarclaw/models', polarClawModelsHandler);
-
-    const polarClawStartHandler = (req: express.Request, res: express.Response) => {
-      try {
-        const { model } = req.body as { model?: string };
-        const sessionId = `polarclaw-chat-${randomUUID().slice(0, 8)}`;
-        const selectedModel = model || 'auto';
-
-        polarClawSessions.set(sessionId, {
-          model: selectedModel,
-          messages: [],
-          createdAt: Date.now(),
-        });
-
-        const id = randomUUID();
-        const now = new Date();
-        const modelLabel = selectedModel === 'auto' ? '自动路由' : selectedModel;
-        const promptText = `**PolarClaw 对话** · 模型: \`${modelLabel}\`\n\n请输入你的问题。`;
-
-        db.insert(uiPrompts).values({
-          id,
-          prompt: promptText,
-          optionsJson: JSON.stringify([]),
-          answer: null,
-          agentId: sessionId,
-          createdAt: now,
-          answeredAt: null,
-        }).run();
-
-        const sessionRow = db.select().from(sessions).where(eq(sessions.agentId, sessionId)).get();
-        if (!sessionRow) {
-          db.insert(sessions).values({
-            mcpSessionId: randomUUID(),
-            agentId: sessionId,
-            displayName: `PolarClaw · ${modelLabel}`,
-            createdAt: now,
-            updatedAt: now,
-            lastPingAt: now,
-          }).run();
-        }
-
-        notifyUiSse('prompt_created', { id, agent_id: sessionId, superseded: 0 });
-        res.json({ session_id: sessionId, prompt_id: id, model: selectedModel });
-      } catch (err) {
-        ctx.logger.error({ err }, 'polarclaw start error');
-        res.status(500).json({ error: 'internal' });
-      }
-    };
-    app.post('/api/ui/polarclaw/start', polarClawStartHandler);
-
-    const polarClawForwardHandler = async (req: express.Request, res: express.Response) => {
-      const promptIdParam = req.params.promptId;
-      const pid = Array.isArray(promptIdParam) ? promptIdParam[0] : promptIdParam;
-      try {
-        if (!pid) {
-          res.status(400).json({ error: 'prompt_id_required' });
-          return;
-        }
-        if (polarClawForwardedPrompts.has(pid)) {
-          res.json({ prompt_id: pid, content: '[already forwarded]', model: 'skip' });
-          return;
-        }
-        polarClawForwardedPrompts.add(pid);
-
-        const promptRow = db.select().from(uiPrompts).where(eq(uiPrompts.id, pid)).get();
-        if (!promptRow || !promptRow.agentId?.startsWith('polarclaw-chat-')) {
-          res.status(404).json({ error: 'not a polarclaw session prompt' });
-          return;
-        }
-
-        const sessionId = promptRow.agentId;
-        let session = polarClawSessions.get(sessionId);
-        if (!session) {
-          session = { model: 'auto', messages: [], createdAt: Date.now() };
-          polarClawSessions.set(sessionId, session);
-        }
-
-        const userMessage = promptRow.answer ?? '';
-        session.messages.push({ role: 'user', content: userMessage });
-
-        const base = await getPolarClawUrl();
-
-        const upstream = await fetch(`${base}/api/agent/chat`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            message: userMessage,
-            conversation_id: sessionId,
-          }),
-          signal: AbortSignal.timeout(120_000),
-        });
-
-        if (!upstream.ok) {
-          const errText = await upstream.text().catch(() => 'unknown');
-          throw new Error(`PolarClaw /api/agent/chat: ${upstream.status} — ${errText}`);
-        }
-
-        const chatResult = (await upstream.json()) as { content: string; conversation_id?: string };
-
-        const DEAD_SESSION_PATTERNS = ['抱歉，处理消息时出错了', '处理消息时出错', 'handleMessage error'];
-        const isDead = DEAD_SESSION_PATTERNS.some(p => chatResult.content.includes(p));
-
-        if (isDead) {
-          ctx.logger.warn({ sessionId }, 'polarclaw session appears dead, auto-closing');
-          polarClawSessions.delete(sessionId);
-          db.update(uiPrompts)
-            .set({ answer: '[auto-closed: PolarClaw 会话已失效]', answeredAt: new Date() })
-            .where(and(eq(uiPrompts.agentId, sessionId), isNull(uiPrompts.answeredAt)))
-            .run();
-          db.delete(sessions).where(eq(sessions.agentId, sessionId)).run();
-          notifyUiSse('session_ended', { session_id: sessionId, reason: 'dead_session' });
-          res.json({ prompt_id: pid, content: chatResult.content, model: session.model, closed: true });
-          return;
-        }
-
-        session.messages.push({ role: 'assistant', content: chatResult.content });
-
-        const replyId = randomUUID();
-        const now = new Date();
-        const modelLabel = session.model === 'auto' ? 'Agent' : session.model;
-        const replyPrompt = `${chatResult.content}\n\n---\n*PolarClaw · ${modelLabel}*`;
-
-        db.insert(uiPrompts).values({
-          id: replyId,
-          prompt: replyPrompt,
-          optionsJson: JSON.stringify([]),
-          answer: null,
-          agentId: sessionId,
-          createdAt: now,
-          answeredAt: null,
-        }).run();
-
-        db.update(sessions)
-          .set({ lastPingAt: now })
-          .where(eq(sessions.agentId, sessionId))
-          .run();
-
-        notifyUiSse('prompt_created', { id: replyId, agent_id: sessionId, superseded: 0 });
-        res.json({ prompt_id: replyId, content: chatResult.content, model: session.model });
-      } catch (err: any) {
-        ctx.logger.error({ err }, 'polarclaw forward error');
-
-        if (!pid) {
-          res.status(502).json({ error: 'polarclaw_error', detail: err.message, closed: true });
-          return;
-        }
-        const promptRow = db.select().from(uiPrompts).where(eq(uiPrompts.id, pid)).get();
-        const sid = promptRow?.agentId;
-        if (sid) {
-          polarClawSessions.delete(sid);
-          db.update(uiPrompts)
-            .set({ answer: `[auto-closed: ${err.message}]`, answeredAt: new Date() })
-            .where(and(eq(uiPrompts.agentId, sid), isNull(uiPrompts.answeredAt)))
-            .run();
-          db.delete(sessions).where(eq(sessions.agentId, sid)).run();
-          notifyUiSse('session_ended', { session_id: sid, reason: 'forward_error' });
-        }
-        res.status(502).json({ error: 'polarclaw_error', detail: err.message, closed: true });
-      }
-    };
-    app.post('/api/ui/polarclaw/forward/:promptId', polarClawForwardHandler);
-
-    const polarClawDeleteSessionHandler = (req: express.Request, res: express.Response) => {
-      const sessionIdParam = req.params.sessionId;
-      const sessionId = Array.isArray(sessionIdParam) ? sessionIdParam[0] : sessionIdParam;
-      if (!sessionId) {
-        res.status(400).json({ error: 'session_id_required' });
-        return;
-      }
-      polarClawSessions.delete(sessionId);
-      // Close any pending prompts for this session
-      db.update(uiPrompts)
-        .set({ answer: '[session ended]', answeredAt: new Date() })
-        .where(and(eq(uiPrompts.agentId, sessionId), isNull(uiPrompts.answeredAt)))
-        .run();
-      // Clean up session registry
-      db.delete(sessions).where(eq(sessions.agentId, sessionId)).run();
-      notifyUiSse('session_ended', { session_id: sessionId });
-      res.json({ ok: true });
-    };
-    app.delete('/api/ui/polarclaw/session/:sessionId', polarClawDeleteSessionHandler);
-  }
-
   // ── Merge API (Main Agent branches) ────────────────────────────────
   app.get('/api/ui/merge/branches', async (_req, res) => {
     try {
@@ -5507,34 +5051,16 @@ agent_type 必须是 "solo" 或 "slave"。
   "task_allocation": [{ "title": "任务", "description": "详细描述", "priority": 90, "module": "模块", "agent_type": "solo|slave" }]
 }`;
 
-      const polarClawPort = await (async () => {
-        try {
-          const portsRes = await fetch('http://127.0.0.1:4800/api/ports', { signal: AbortSignal.timeout(3000) });
-          const ports = await portsRes.json() as Array<{ port: number; service?: string; project?: string }>;
-          const mc = ports.find(p => p.service === 'polarclaw-web' || (p.project || '').toLowerCase().includes('polarclaw'));
-          return mc?.port ?? 3910;
-        } catch { return 3910; }
-      })();
-
-      const chatRes = await fetch(`http://127.0.0.1:${polarClawPort}/api/chat`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          system: systemPrompt,
-          messages: [{ role: 'user', content: '根据需求分析，生成代码映射、技术概览、任务分配三个阶段的完整内容。' }],
-          context_query: `${row.title} ${row.goal}`,
-          max_tokens: 8192,
-        }),
-        signal: AbortSignal.timeout(900_000), // 15 minutes
+      const chatData = await callPolarPrivateChat({
+        system: systemPrompt,
+        user: '根据需求分析，生成代码映射、技术概览、任务分配三个阶段的完整内容。',
+        maxTokens: 8192,
       });
 
-      if (!chatRes.ok) {
-        const errText = await chatRes.text();
-        res.status(502).json({ error: `PolarClaw error: ${chatRes.status} ${errText}` });
+      if (!chatData.ok) {
+        res.status(502).json({ error: `LLM proxy error: ${chatData.status} ${chatData.error}` });
         return;
       }
-
-      const chatData = await chatRes.json() as { content: string; model?: string };
       let generated: { code_mapping?: unknown; tech_overview?: unknown; task_allocation?: unknown } = {};
       try {
         const jsonMatch = chatData.content.match(/\{[\s\S]*\}/);
@@ -5621,33 +5147,15 @@ ${taskAllocation.map((t, i) => `${i + 1}. [${t.agent_type || 'solo'}] ${t.title}
 ## 输出格式（JSON 数组，不含其他内容）
 [{ "task_index": 0, "task_title": "...", "agent_type": "solo|slave", "prompt": "完整的中文 Agent 执行 Prompt，包含：目标、验收标准、涉及文件、技术约束" }]`;
 
-      const polarClawPort = await (async () => {
-        try {
-          const portsRes = await fetch('http://127.0.0.1:4800/api/ports', { signal: AbortSignal.timeout(3000) });
-          const ports = await portsRes.json() as Array<{ port: number; service?: string; project?: string }>;
-          const mc = ports.find(p => p.service === 'polarclaw-web' || (p.project || '').toLowerCase().includes('polarclaw'));
-          return mc?.port ?? 3910;
-        } catch { return 3910; }
-      })();
-
-      const chatRes = await fetch(`http://127.0.0.1:${polarClawPort}/api/chat`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          system: systemPrompt,
-          messages: [{ role: 'user', content: '请为以上任务分配生成可执行的 Agent Prompt。' }],
-          context_query: `${row.title} ${row.goal}`,
-        }),
-        signal: AbortSignal.timeout(900_000), // 15 minutes
+      const chatData = await callPolarPrivateChat({
+        system: systemPrompt,
+        user: '请为以上任务分配生成可执行的 Agent Prompt。',
       });
 
-      if (!chatRes.ok) {
-        const errText = await chatRes.text();
-        res.status(502).json({ error: `PolarClaw error: ${chatRes.status} ${errText}` });
+      if (!chatData.ok) {
+        res.status(502).json({ error: `LLM proxy error: ${chatData.status} ${chatData.error}` });
         return;
       }
-
-      const chatData = await chatRes.json() as { content: string; usage?: unknown; model?: string };
       let prompts: Array<{ task_index: number; task_title: string; agent_type: string; prompt: string }> = [];
       try {
         const jsonMatch = chatData.content.match(/\[[\s\S]*\]/);
@@ -5731,6 +5239,60 @@ async function syncPortsFromSOTAgent(): Promise<void> {
     if (config.polar_private) PP_API_PORT = String(config.polar_private);
     _portsSynced = true;
   } catch { /* SOTAgent not reachable, use defaults */ }
+}
+
+interface PolarPrivateChatResult {
+  ok: boolean;
+  status: number;
+  content: string;
+  model?: string;
+  usage?: unknown;
+  error?: string;
+}
+
+// PolarClaw 已于 2026-08-11 退役，LLM 统一经 PolarPrivate QCSA 代理供给。
+async function callPolarPrivateChat(opts: {
+  system: string;
+  user: string;
+  maxTokens?: number;
+}): Promise<PolarPrivateChatResult> {
+  await syncPortsFromSOTAgent();
+  const service = process.env.HUB_LLM_SERVICE ?? 'llm.aliyun.codingplan';
+  const model = process.env.HUB_LLM_MODEL ?? 'qwen3-coder-plus';
+  const resp = await fetch(`http://127.0.0.1:${PP_API_PORT}/proxy/${service}/chat/completions`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      model,
+      messages: [
+        { role: 'system', content: opts.system },
+        { role: 'user', content: opts.user },
+      ],
+      max_tokens: opts.maxTokens ?? 8192,
+      temperature: 0.3,
+    }),
+    signal: AbortSignal.timeout(900_000),
+  });
+  if (!resp.ok) {
+    return {
+      ok: false,
+      status: resp.status,
+      content: '',
+      error: await resp.text().catch(() => 'unknown'),
+    };
+  }
+  const data = (await resp.json()) as {
+    choices?: Array<{ message?: { content?: string } }>;
+    model?: string;
+    usage?: unknown;
+  };
+  return {
+    ok: true,
+    status: resp.status,
+    content: data.choices?.[0]?.message?.content ?? '',
+    model: data.model,
+    usage: data.usage,
+  };
 }
 
 async function checkAllServices(_ctx: HubContext): Promise<ServiceStatus[]> {

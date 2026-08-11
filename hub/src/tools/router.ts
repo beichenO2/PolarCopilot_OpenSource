@@ -1,8 +1,12 @@
 /**
- * tools/router.ts — Host tool proxy for PolarUI workflow executor.
+ * tools/router.ts — Host tool proxy for browser/Electron workflow executors.
  *
  * Browser/Electron clients cannot access the filesystem or shell directly.
  * Hub runs on localhost and proxies safe, scoped operations.
+ *
+ * PolarUI was the original caller and retired 2026-08-11 (see root ARCHIVED.md);
+ * the `polarui-*` alert sources below stay as the on-the-wire format that
+ * `checkup/route.ts` still indexes for historical events.
  */
 
 import { Router } from 'express'

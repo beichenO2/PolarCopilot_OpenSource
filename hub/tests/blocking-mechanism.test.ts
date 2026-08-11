@@ -95,7 +95,7 @@ describe('Hub Web Blocking Mechanism', () => {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        agent_type: 'polarclaw',
+        agent_type: 'polarcopilot',
         agent_name: 'TestAgent',
         main_model: 'qwen-3.6-plus',
         subagent_model: 'qwen-3.6-plus',
@@ -141,7 +141,7 @@ describe('Hub Web Blocking Mechanism', () => {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        agent_type: 'polarclaw',
+        agent_type: 'polarcopilot',
         agent_name: 'TestAgent2',
         main_model: 'qwen-3.6-plus',
         subagent_model: 'qwen-3.6-plus',
@@ -192,7 +192,7 @@ describe('Hub Web Blocking Mechanism', () => {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        agent_type: 'polarclaw',
+        agent_type: 'polarcopilot',
         agent_name: 'TestAgent3',
         main_model: 'qwen-3.6-plus',
         subagent_model: 'qwen-3.6-plus',

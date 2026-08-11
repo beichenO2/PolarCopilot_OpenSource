@@ -6,9 +6,7 @@ import { PromptsPage } from './pages/PromptsPage'
 import { YoloPage } from './pages/YoloPage'
 import { EvolutionPage } from './pages/EvolutionPage'
 import { SSOTPage } from './pages/SSOTPage'
-import { PilotPage } from './pages/PilotPage'
 import ProlusionPage from './pages/ProlusionPage'
-import { StartAgentPage } from './pages/StartAgentPage'
 import { CheckupEventsPage } from './pages/CheckupEventsPage'
 import { RrPage } from './pages/RrPage'
 import { AfkPage } from './pages/AfkPage'
@@ -68,9 +66,7 @@ export default function App() {
             <Route path="/ssot" element={<SSOTPage />} />
             <Route path="/prolusion" element={<ProlusionPage />} />
             <Route path="/yolo" element={<YoloPage />} />
-            <Route path="/pilot" element={<PilotPage />} />
             <Route path="/evolution" element={<EvolutionPage />} />
-            <Route path="/start-agent" element={<StartAgentPage />} />
             <Route path="/checkup-events" element={<CheckupEventsPage />} />
           </Route>
         </Routes>

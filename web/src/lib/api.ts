@@ -1,5 +1,4 @@
 import type { Agent, Prompt, HubEvent, Task, AgentsSummary, ServiceHealth, ProjectData, EcoService, PortEntry, DeviceResource } from '../types/hub'
-import type { PilotStatusSummary, LobsterStatus, LobsterEvent } from '../types/pilot-status'
 import type {
   RrSession,
   RrSessionDetail,
@@ -400,15 +399,6 @@ export const api = {
       del<{ ok: boolean }>(`/api/ui/prolusion/${id}`),
   },
 
-  polarclaw: {
-    models: () => get<{ models: string[]; intent_models: Record<string, string> }>('/api/ui/polarclaw/models'),
-    start: (model?: string) =>
-      post<{ session_id: string; prompt_id: string; model: string }>('/api/ui/polarclaw/start', { model }),
-    forward: (promptId: string) =>
-      post<{ prompt_id: string; content: string; model: string }>(`/api/ui/polarclaw/forward/${promptId}`),
-    endSession: (sessionId: string) =>
-      del<{ ok: boolean }>(`/api/ui/polarclaw/session/${sessionId}`),
-  },
   rr: {
     sessions: () => get<{ sessions: RrSession[] }>('/api/ui/rr/sessions'),
     createSession: (data: {
@@ -510,11 +500,6 @@ export const api = {
         `/api/ui/rr/afk/vnext/tasks/${encodeURIComponent(taskId)}/completion`,
       ),
   },
-  pilotStatus: {
-    summary: () => get<PilotStatusSummary>('/api/ui/pilot-status'),
-    project: (id: string) => get<LobsterStatus & { events: LobsterEvent[] }>(`/api/ui/pilot-status/${id}`),
-  },
-
   alignment: {
     list: (status?: string) => get<AlignmentDoc[]>(`/api/ui/alignment${status ? `?status=${status}` : ''}`),
     get: (id: string) => get<AlignmentDoc>(`/api/ui/alignment/${id}`),
