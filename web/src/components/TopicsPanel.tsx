@@ -1,6 +1,7 @@
 import { useState, useCallback } from 'react'
 import { useTopicsStore, type Topic } from '../stores/topics'
 import type { SSOTAnnotation } from '../lib/api'
+import { TopicHtmlViewer } from './TopicHtmlViewer'
 
 interface Props {
   /** collect: SSoT页，接收批注拖入；reference: PromptsPage，主题可拖出到Pending */
@@ -89,6 +90,8 @@ export function TopicsPanel({ mode }: Props) {
           </button>
         </div>
       )}
+
+      <TopicHtmlViewer />
 
       {/* Topic list */}
       <div className="space-y-1.5 px-1">

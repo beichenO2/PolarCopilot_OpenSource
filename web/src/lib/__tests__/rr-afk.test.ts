@@ -2,11 +2,6 @@ import { describe, expect, it } from 'vitest'
 import {
   formatAfkSummaryLine,
   formatAfkTaskStatusLabel,
-  formatActiveAfkTasksLabel,
-  countActiveAfkTasks,
-  listActiveAfkSummaries,
-  listActiveAfkTaskIds,
-  listActiveAfkTasks,
   needsHumanReview,
   pickPrimaryAfkSummary,
 } from '../rr-afk'
@@ -60,16 +55,6 @@ function makeStatus(overrides: Partial<RrAfkStatus> = {}): RrAfkStatus {
       lastAction: null,
     },
     summaries: [makeSummary({ task_id: 'primary-task' })],
-    activeTasks: [{
-      taskId: 'primary-task',
-      masterSessionId: 'sess-1',
-      status: 'RUNNING',
-      loopCount: 3,
-      maxLoops: 40,
-      paused: false,
-      done: false,
-      projectRoot: '/tmp/demo',
-    }],
     index: { active_tasks: ['primary-task'], updated_at: '2026-07-30T00:00:00.000Z' },
     ...overrides,
   }
@@ -105,59 +90,5 @@ describe('rr-afk helpers', () => {
   it('formatAfkSummaryLine includes status, unit, revision, and loop', () => {
     expect(formatAfkSummaryLine(makeSummary())).toBe('demo-task · 运行中 · unit U1 · rev 2 · loop 3')
     expect(formatAfkTaskStatusLabel('NEEDS_HUMAN')).toBe('需人工')
-  })
-
-  it('listActiveAfkTaskIds returns all index active_tasks', () => {
-    const status = makeStatus({
-      index: { active_tasks: ['task-a', 'task-b'], updated_at: '2026-07-30T00:00:00.000Z' },
-    })
-    expect(listActiveAfkTaskIds(status)).toEqual(['task-a', 'task-b'])
-  })
-
-  it('listActiveAfkTasks and listActiveAfkSummaries expose multi-active rows', () => {
-    const status = makeStatus({
-      taskId: 'task-a',
-      summaries: [
-        makeSummary({ task_id: 'task-a' }),
-        makeSummary({ task_id: 'task-b', status: 'READY' }),
-        makeSummary({ task_id: 'idle-task', status: 'DONE' }),
-      ],
-      activeTasks: [
-        {
-          taskId: 'task-a',
-          masterSessionId: 'sess-a',
-          status: 'RUNNING',
-          loopCount: 1,
-          maxLoops: 40,
-          paused: false,
-          done: false,
-          projectRoot: '/tmp/a',
-        },
-        {
-          taskId: 'task-b',
-          masterSessionId: 'sess-b',
-          status: 'READY',
-          loopCount: 0,
-          maxLoops: 40,
-          paused: false,
-          done: false,
-          projectRoot: '/tmp/b',
-        },
-      ],
-      index: { active_tasks: ['task-a', 'task-b'], updated_at: '2026-07-30T00:00:00.000Z' },
-    })
-
-    expect(listActiveAfkTasks(status)).toHaveLength(2)
-    expect(listActiveAfkSummaries(status).map((item) => item.task_id)).toEqual(['task-a', 'task-b'])
-  })
-
-  it('countActiveAfkTasks and formatActiveAfkTasksLabel reflect fleet-10 index', () => {
-    expect(countActiveAfkTasks(null)).toBe(0)
-    expect(formatActiveAfkTasksLabel(null)).toBe('0 active')
-    const status = makeStatus({
-      index: { active_tasks: ['a', 'b', 'c'], updated_at: '2026-07-30T00:00:00.000Z' },
-    })
-    expect(countActiveAfkTasks(status)).toBe(3)
-    expect(formatActiveAfkTasksLabel(status)).toBe('3 active')
   })
 })

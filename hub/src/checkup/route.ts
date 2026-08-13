@@ -27,9 +27,9 @@ export interface CheckupReportEntry {
  *   needs_human > resolved > processing > pending
  *
  * Terminal states (needs_human / resolved) win over interim markers
- * (processing emitted by `hub-checkup-watcher`, pending fallback), so an
- * external runner's `resolved` report posted after the Hub enqueue marker
- * collapses to `resolved`. Within terminal states `needs_human` trumps `resolved`
+ * (processing emitted by `hub-checkup-watcher`, pending fallback), so a
+ * PolarUI `resolved` report posted after the Hub enqueue marker collapses to
+ * `resolved`. Within terminal states `needs_human` still trumps `resolved`
  * because human approval should not be auto-dismissed.
  */
 const CHECKUP_REPORT_STATUS_RANK: Record<CheckupEventStatus, number> = {
@@ -97,8 +97,8 @@ export function mergeCheckupReportStatus(
 
 /**
  * Reports emitted by the Hub-side enqueue daemon. Their summary is just a
- * "queued" marker — when a richer report from an external checkup runner
- * arrives, the richer summary always wins regardless of status rank.
+ * "queued" marker — when a richer report from PolarUI arrives, the richer
+ * summary always wins regardless of status rank.
  */
 const ENQUEUE_HANDLER = 'hub-checkup-watcher';
 
@@ -216,6 +216,7 @@ function checkupJsonlCandidatePaths(): string[] {
   return [
     ...(process.env.PC_CHECKUP_JSONL_PATH ? [process.env.PC_CHECKUP_JSONL_PATH] : []),
     join(process.env.HOME ?? '', 'Polarisor', 'SOTAgent', 'data', 'checkup-events.jsonl'),
+    join(process.env.HOME ?? '', 'Polarisor', 'PolarOps', 'data', 'checkup-events.jsonl'),
   ];
 }
 
@@ -474,11 +475,11 @@ export function createCheckupRouter(deps: CheckupRouterDeps): Router {
     }
 
     // Hub-side enqueue daemon: publish a `processing` report alert immediately
-    // so the user can see "已入队 @checkup-agent" within 60s. An external
-    // checkup runner may later emit a richer `resolved` / `needs_human` report
-    // via the same alert channel, which `indexReportsFromAlerts` collapses by
-    // event_id and status rank, so this enqueue marker never downgrades the
-    // final verdict. (PolarUI was the original runner; retired 2026-08-11.)
+    // so the user can see "已入队 @checkup-agent" within 60s even when PolarUI
+    // browser/Electron is not running. The PolarUI checkup-runner — when online
+    // — emits a richer `resolved` / `needs_human` report later via the same
+    // alert channel, which `indexReportsFromAlerts` collapses by event_id and
+    // status rank, so this enqueue marker never downgrades the final verdict.
     if (routedToInbox && enqueueDaemonEnabled) {
       try {
         pushAlert(
@@ -489,7 +490,7 @@ export function createCheckupRouter(deps: CheckupRouterDeps): Router {
             detail: JSON.stringify({
               event_id: event.event_id,
               status: 'processing',
-              summary: `已入队 @checkup-agent；等待 checkup runner 接管诊断/修复`,
+              summary: `已入队 @checkup-agent；PolarUI 在线后会接管诊断/修复`,
               handler: 'hub-checkup-watcher',
             }),
             timestamp: new Date().toISOString(),

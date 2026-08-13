@@ -1,7 +1,7 @@
 /**
  * alerts/router.ts — Hub alerts endpoint.
  *
- * POST /api/ui/alerts — receive alert from Watchdog / SOTAgent / etc.
+ * POST /api/ui/alerts — receive alert from Watchdog / PolarPilot / etc.
  * GET  /api/ui/alerts — list alerts (optional ?severity=critical&limit=20)
  * DELETE /api/ui/alerts/:id — acknowledge/clear alert
  *

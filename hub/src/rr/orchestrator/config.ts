@@ -30,10 +30,6 @@ const DEFAULTS: OrchestratorConfig = {
   subagentRecoveryCooldownMs: 45_000,
   subagentPruneAfterMs: 15 * 60_000,
   subagentHeadless: true,
-  budgetShedder: true,
-  budgetPausableServiceIds: [],
-  budgetMaxPausePerTick: 2,
-  budgetMaxResumePerTick: 2,
 };
 
 function expandHome(value: string): string {

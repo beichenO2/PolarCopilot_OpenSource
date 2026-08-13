@@ -146,17 +146,6 @@ export interface RrAfkTaskIndex {
   updated_at: string
 }
 
-export interface RrAfkActiveTaskStatus {
-  taskId: string
-  masterSessionId: string | null
-  status: RrAfkTaskStatus
-  loopCount: number
-  maxLoops: number
-  paused: boolean
-  done: boolean
-  projectRoot: string
-}
-
 export interface RrAfkStatus {
   ok: boolean
   active: boolean
@@ -165,10 +154,7 @@ export interface RrAfkStatus {
   maxLoops: number
   loopCount: number
   taskDir: string | null
-  /** Primary task compat mirror; use activeTasks / index.active_tasks for the full set */
   taskId: string | null
-  /** All concurrently active AFK tasks with dedicated master bindings */
-  activeTasks: RrAfkActiveTaskStatus[]
   todo: RrAfkTodoProgress
   criteria: { count: number; summary: string[] }
   orchestrator: {

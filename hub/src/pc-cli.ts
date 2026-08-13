@@ -110,12 +110,11 @@ export function usageText(): string {
   return `Usage: pc afk <command> [options]
 
 Commands:
-  start [--session-id ID] [--no-spawn] [--task-slug SLUG] [--task-dir DIR] [--project ROOT] [--mode start|solo|go] [--force] [--no-orchestrator]
+  start [--task-slug SLUG] [--task-dir DIR] [--project ROOT] [--mode start|solo|go] [--force] [--no-orchestrator]
   status [--json] [--project ROOT]
   summary
   pause [taskId]
   resume [taskId]
-  done <taskId>
   tick [--task-id ID]
   inject <sessionId> <text...>
   grant --task ID --path PATH [--path PATH ...] --confirmed
@@ -124,13 +123,9 @@ Commands:
   halt
   heartbeat-spec [--task-id ID]
   loop-prompt
-  gate-check --conversation-id ID [--cwd PATH]   (local vNext; for stop hook)
-  ide-bind --conversation-id ID --project ROOT [--goal TEXT] [--task-id ID]
-  migrate-dry-run [--root PATH]                  (local vNext file→SQLite dry-run)
 
 Environment:
   PC_HUB_URL    Hub base URL (default ${DEFAULT_HUB_URL})
-  POLAR_AFK_DB  AFK vNext SQLite path (default ~/.polar-copilot/afk/afk.db)
 `;
 }
 
@@ -163,11 +158,8 @@ export function resolveAfkCall(command: string, rest: string[]): HubCall | 'prin
   switch (command) {
     case 'start': {
       const body: Record<string, unknown> = { spawnIfNeeded: true, startOrchestrator: true };
-      const sessionId = takeFlag(rest, '--session-id');
-      let args = sessionId.rest;
-      if (sessionId.value) body.sessionId = sessionId.value;
-      const slug = takeFlag(args, '--task-slug');
-      args = slug.rest;
+      const slug = takeFlag(rest, '--task-slug');
+      let args = slug.rest;
       if (slug.value) body.taskSlug = slug.value;
       const taskDir = takeFlag(args, '--task-dir');
       args = taskDir.rest;
@@ -180,10 +172,7 @@ export function resolveAfkCall(command: string, rest: string[]): HubCall | 'prin
       if (mode.value) body.mode = mode.value;
       if (hasFlag(args, '--force')) body.force = true;
       if (hasFlag(args, '--no-orchestrator')) body.startOrchestrator = false;
-      if (hasFlag(args, '--no-spawn')) body.spawnIfNeeded = false;
-      args = args.filter((token) =>
-        token !== '--force' && token !== '--no-orchestrator' && token !== '--no-spawn',
-      );
+      args = args.filter((token) => token !== '--force' && token !== '--no-orchestrator');
       if (args.length > 0) throw new Error(`unknown_args:${args.join(' ')}`);
       return { method: 'POST', path: '/api/ui/rr/afk/one-click', body };
     }
@@ -206,12 +195,6 @@ export function resolveAfkCall(command: string, rest: string[]): HubCall | 'prin
       const [taskId] = rest;
       if (rest.length > 1) throw new Error(`unknown_args:${rest.slice(1).join(' ')}`);
       return { method: 'POST', path: '/api/ui/rr/afk/resume', body: taskId ? { taskId } : {} };
-    }
-    case 'done': {
-      const [taskId] = rest;
-      if (!taskId) throw new Error('missing_value:taskId');
-      if (rest.length > 1) throw new Error(`unknown_args:${rest.slice(1).join(' ')}`);
-      return { method: 'POST', path: '/api/ui/rr/afk/done', body: { taskId } };
     }
     case 'tick': {
       const taskId = takeFlag(rest, '--task-id');
@@ -276,47 +259,15 @@ export function resolveAfkCall(command: string, rest: string[]): HubCall | 'prin
   }
 }
 
-function formatActiveTaskLine(task: Record<string, unknown>): string {
-  const parts = [
-    String(task.taskId ?? '-'),
-    `status=${String(task.status ?? '-')}`,
-    `loop=${String(task.loopCount ?? 0)}/${String(task.maxLoops ?? 0)}`,
-  ];
-  if (task.masterSessionId) parts.push(`master=${String(task.masterSessionId)}`);
-  if (task.paused) parts.push('paused');
-  if (task.done) parts.push('done');
-  if (task.projectRoot) parts.push(`root=${String(task.projectRoot)}`);
-  return `  - ${parts.join(' · ')}`;
-}
-
 function formatStatus(payload: unknown): string {
   if (!payload || typeof payload !== 'object') return JSON.stringify(payload, null, 2);
   const status = payload as Record<string, unknown>;
   const lines = [
     `active: ${String(status.active ?? false)}`,
-    `taskId: ${String(status.taskId ?? '-')} (primary compat mirror)`,
+    `taskId: ${String(status.taskId ?? '-')}`,
     `loopCount: ${String(status.loopCount ?? 0)}`,
     `orchestrator: ${JSON.stringify(status.orchestrator ?? {})}`,
   ];
-  const activeTasks = status.activeTasks;
-  if (Array.isArray(activeTasks) && activeTasks.length > 0) {
-    lines.push(`activeTasks (${activeTasks.length}):`);
-    for (const item of activeTasks) {
-      if (item && typeof item === 'object') {
-        lines.push(formatActiveTaskLine(item as Record<string, unknown>));
-      }
-    }
-  } else {
-    const indexTasks = (status.index as Record<string, unknown> | undefined)?.active_tasks;
-    if (Array.isArray(indexTasks) && indexTasks.length > 0) {
-      lines.push(`activeTasks (${indexTasks.length}):`);
-      for (const taskId of indexTasks) {
-        lines.push(`  - ${String(taskId)}`);
-      }
-    } else {
-      lines.push('activeTasks: (none)');
-    }
-  }
   const todo = status.todo;
   if (todo && typeof todo === 'object') {
     const todoObj = todo as Record<string, unknown>;
@@ -354,70 +305,6 @@ export async function runPcCli(argv: string[], deps: PcCliDeps = {}): Promise<nu
     if (command === 'loop-prompt') {
       if (rest.length > 0) throw new Error(`unknown_args:${rest.join(' ')}`);
       stdout(buildLoopPrompt());
-      return 0;
-    }
-
-    if (command === 'gate-check') {
-      const conv = takeFlag(rest, '--conversation-id');
-      let args = conv.rest;
-      if (!conv.value) throw new Error('missing_value:--conversation-id');
-      const cwd = takeFlag(args, '--cwd');
-      args = cwd.rest;
-      if (args.length > 0) throw new Error(`unknown_args:${args.join(' ')}`);
-      const { openAfkDb } = await import('./rr/afk/vnext/db.js');
-      const { gateCheckForConversation } = await import('./rr/afk/vnext/ide-adapter.js');
-      const db = openAfkDb();
-      try {
-        const result = gateCheckForConversation(db, conv.value, cwd.value);
-        stdout(JSON.stringify({ ...result, ok: result.ok }, null, 0));
-      } finally {
-        db.close();
-      }
-      return 0;
-    }
-
-    if (command === 'ide-bind') {
-      const conv = takeFlag(rest, '--conversation-id');
-      let args = conv.rest;
-      if (!conv.value) throw new Error('missing_value:--conversation-id');
-      const project = takeFlag(args, '--project');
-      args = project.rest;
-      if (!project.value) throw new Error('missing_value:--project');
-      const goal = takeFlag(args, '--goal');
-      args = goal.rest;
-      const task = takeFlag(args, '--task-id');
-      args = task.rest;
-      if (args.length > 0) throw new Error(`unknown_args:${args.join(' ')}`);
-      const { openAfkDb } = await import('./rr/afk/vnext/db.js');
-      const { bindIdeConversation } = await import('./rr/afk/vnext/ide-adapter.js');
-      const db = openAfkDb();
-      try {
-        const row = bindIdeConversation(db, {
-          conversationId: conv.value,
-          projectRoot: project.value,
-          goal: goal.value,
-          taskId: task.value,
-        });
-        stdout(JSON.stringify({ ok: true, task: row }, null, 2));
-      } finally {
-        db.close();
-      }
-      return 0;
-    }
-
-    if (command === 'migrate-dry-run') {
-      const root = takeFlag(rest, '--root');
-      if (root.rest.length > 0) throw new Error(`unknown_args:${root.rest.join(' ')}`);
-      const { openAfkDb } = await import('./rr/afk/vnext/db.js');
-      const { migrateFromFileRoot } = await import('./rr/afk/vnext/migrate.js');
-      const { afkRoot } = await import('./rr/afk/paths.js');
-      const db = openAfkDb();
-      try {
-        const report = migrateFromFileRoot(db, root.value ?? afkRoot(), { dryRun: true });
-        stdout(JSON.stringify(report, null, 2));
-      } finally {
-        db.close();
-      }
       return 0;
     }
 

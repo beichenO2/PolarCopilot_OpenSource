@@ -3,12 +3,13 @@ import { clsx } from 'clsx'
 
 const links = [
   { to: '/', label: 'Dashboard' },
+  { to: '/start-agent', label: 'Start Agent' },
   { to: '/prompts', label: 'Agent Control' },
   { to: '/rr', label: 'Rr' },
-  { to: '/afk', label: 'AFK' },
   { to: '/ssot', label: 'SSoT' },
   { to: '/prolusion', label: 'Prolusion' },
   { to: '/yolo', label: 'YOLO' },
+  { to: '/pilot', label: 'Pilot 状态' },
   { to: '/evolution', label: 'Evolution' },
   { to: '/checkup-events', label: '检修历史' },
 ]

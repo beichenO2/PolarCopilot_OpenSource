@@ -28,24 +28,6 @@ export interface OrchestratorConfig {
   subagentRecoveryCooldownMs?: number;
   subagentPruneAfterMs?: number;
   subagentHeadless?: boolean;
-  /** When false, skip PolarBudget pause/resume shedder on each tick. Default true. */
-  budgetShedder?: boolean;
-  /** Optional allowlist of PolarProcess service ids that may be paused under critical pressure. */
-  budgetPausableServiceIds?: string[];
-  budgetMaxPausePerTick?: number;
-  budgetMaxResumePerTick?: number;
-}
-
-/** Per-AFK-task inject/cooldown state — keyed by taskId in OrchestratorState.tasks */
-export interface TaskOrchestratorState {
-  loopCount: number;
-  lastInjectedAt: number | null;
-  lastInjectedHash: string | null;
-  lastSessionId: string | null;
-  lastAction: string | null;
-  injectionCount: number;
-  injectionWindowStart: number;
-  paused: boolean;
 }
 
 export interface OrchestratorState {
@@ -59,8 +41,6 @@ export interface OrchestratorState {
   lastSessionId: string | null;
   lastAction: string | null;
   paused: boolean;
-  /** Per-task orchestrator slice — enables unlimited parallel AFK tasks */
-  tasks?: Record<string, TaskOrchestratorState>;
   managedSubagentIds: string[];
   lastPoolRecoveryAt: Record<string, number>;
   lastPoolAction: string | null;
@@ -109,7 +89,6 @@ export type PlannerAction =
 export interface OrchestratorTick {
   at: number;
   sessionId: string;
-  taskId?: string | null;
   action: PlannerAction;
 }
 

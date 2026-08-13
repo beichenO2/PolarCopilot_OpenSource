@@ -186,8 +186,7 @@ describe('rr orchestrator planner + rr-afk snapshot', () => {
     expect(action.content).toContain('human_action_hint');
     expect(action.content).toContain('Review allowlist before merge');
     expect(action.content).toContain('DECISIONS.md');
-    expect(action.content).toContain('禁止亲自读/写仓库源代码');
-    expect(action.content).toContain('dispatch_subagent_task');
+    expect(action.content).toContain('status / 命令 / 验证');
     expect(action.content).toContain('U2 — add endpoint');
   });
 

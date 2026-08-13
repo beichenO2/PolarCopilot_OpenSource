@@ -11,9 +11,7 @@ import {
 
 describe('pc cli', () => {
   it('prints usage help text', () => {
-    expect(usageText()).toContain('--task-slug SLUG');
-    expect(usageText()).toContain('--session-id ID');
-    expect(usageText()).toContain('--no-spawn');
+    expect(usageText()).toContain('start [--task-slug SLUG]');
     expect(usageText()).toContain('heartbeat-spec');
     expect(usageText()).toContain('PC_HUB_URL');
   });
@@ -21,26 +19,6 @@ describe('pc cli', () => {
   it('resolves hub url from PC_HUB_URL', () => {
     expect(resolveHubUrl({ PC_HUB_URL: 'http://127.0.0.1:9000/' })).toBe('http://127.0.0.1:9000');
     expect(resolveHubUrl({})).toBe('http://127.0.0.1:8040');
-  });
-
-  it('builds one-click start call with bind-self flags', () => {
-    expect(resolveAfkCall('start', [
-      '--session-id', 'sess-bind',
-      '--no-spawn',
-      '--task-slug', 'fleet-task',
-      '--mode', 'solo',
-      '--no-orchestrator',
-    ])).toEqual({
-      method: 'POST',
-      path: '/api/ui/rr/afk/one-click',
-      body: {
-        spawnIfNeeded: false,
-        startOrchestrator: false,
-        sessionId: 'sess-bind',
-        taskSlug: 'fleet-task',
-        mode: 'solo',
-      },
-    });
   });
 
   it('builds one-click start call', () => {
@@ -88,11 +66,6 @@ describe('pc cli', () => {
       method: 'POST',
       path: '/api/ui/rr/afk/resume',
       body: {},
-    });
-    expect(resolveAfkCall('done', ['task-1'])).toEqual({
-      method: 'POST',
-      path: '/api/ui/rr/afk/done',
-      body: { taskId: 'task-1' },
     });
     expect(resolveAfkCall('tick', ['--task-id', 'task-1'])).toEqual({
       method: 'POST',
@@ -188,56 +161,6 @@ describe('pc cli', () => {
     expect(calls[1]?.url).toBe(joinHubPath(hubUrl, '/api/ui/rr/afk/status'));
     expect(humanLines.join('\n')).toContain('active: true');
     expect(humanLines.join('\n')).toContain('taskId: task-1');
-  });
-
-  it('prints all activeTasks in human status output', async () => {
-    const fetchFn = vi.fn(async () => new Response(JSON.stringify({
-      ok: true,
-      active: true,
-      taskId: 'task-a',
-      loopCount: 2,
-      todo: { pending: 1, done: 2 },
-      orchestrator: { running: true },
-      activeTasks: [
-        {
-          taskId: 'task-a',
-          masterSessionId: 'sess-a',
-          status: 'RUNNING',
-          loopCount: 2,
-          maxLoops: 40,
-          paused: false,
-          done: false,
-          projectRoot: '/tmp/a',
-        },
-        {
-          taskId: 'task-b',
-          masterSessionId: 'sess-b',
-          status: 'READY',
-          loopCount: 0,
-          maxLoops: 40,
-          paused: false,
-          done: false,
-          projectRoot: '/tmp/b',
-        },
-      ],
-      index: { active_tasks: ['task-a', 'task-b'], updated_at: '2026-07-30T00:00:00.000Z' },
-    }), {
-      status: 200,
-      headers: { 'Content-Type': 'application/json' },
-    }));
-
-    const humanLines: string[] = [];
-    const statusCode = await runPcCli(['afk', 'status'], {
-      fetchFn,
-      stdout: (line) => humanLines.push(line),
-    });
-    expect(statusCode).toBe(0);
-    const output = humanLines.join('\n');
-    expect(output).toContain('activeTasks (2):');
-    expect(output).toContain('task-a');
-    expect(output).toContain('task-b');
-    expect(output).toContain('master=sess-a');
-    expect(output).toContain('master=sess-b');
   });
 
   it('exports fixed prompt helpers', () => {

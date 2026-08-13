@@ -45,58 +45,6 @@ function pickPrimarySummary(
   return summaries[0] ?? null;
 }
 
-/** Build an AfkSnapshot for one taskId (authoritative per-task view for orchestrator ticks). */
-export function readTaskAfkSnapshot(config: OrchestratorConfig, taskId: string): AfkSnapshot | null {
-  const summary = readSummary(taskId);
-  if (!summary) return null;
-
-  const activeTaskIds = resolveActiveTasks();
-  const dir = rrTaskDir(taskId);
-  const state = readState(taskId);
-  const status = summary.status;
-
-  const active = activeTaskIds.includes(taskId) && status !== 'DONE' && status !== 'PAUSED';
-  const paused = status === 'PAUSED';
-  const done = status === 'DONE';
-
-  const criteriaPath = existsSync(join(dir, 'CRITERIA.md'))
-    ? join(dir, 'CRITERIA.md')
-    : firstExisting(summary.project_root ?? config.projectRoot, config.criteriaPaths);
-  const todoPath = existsSync(join(dir, 'TODO.md'))
-    ? join(dir, 'TODO.md')
-    : firstExisting(summary.project_root ?? config.projectRoot, config.todoPaths);
-
-  return {
-    active,
-    paused,
-    done,
-    taskDir: dir,
-    criteriaText: criteriaPath ? readText(criteriaPath) : null,
-    todoText: todoPath ? readText(todoPath) : null,
-    maxLoops: state?.max_loops ?? config.maxLoops,
-    summaries: listTaskSummaries(),
-    primarySummary: summary,
-    taskId,
-    source: 'rr-afk',
-  };
-}
-
-/** All eligible active AFK tasks — one snapshot per taskId for parallel orchestrator ticks. */
-export function readActiveTaskSnapshots(config: OrchestratorConfig): AfkSnapshot[] {
-  const activeTaskIds = resolveActiveTasks();
-  if (activeTaskIds.length > 0) {
-    return activeTaskIds
-      .map((taskId) => readTaskAfkSnapshot(config, taskId))
-      .filter((snapshot): snapshot is AfkSnapshot => Boolean(snapshot?.active));
-  }
-
-  const legacy = readLegacyAfkSnapshot(config);
-  if (legacy.active && !legacy.paused && !legacy.done) {
-    return [legacy];
-  }
-  return [];
-}
-
 function readRrAfkSnapshot(config: OrchestratorConfig): AfkSnapshot | null {
   const summaries = listTaskSummaries();
   if (summaries.length === 0) return null;

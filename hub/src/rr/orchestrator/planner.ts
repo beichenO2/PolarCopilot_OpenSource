@@ -1,11 +1,5 @@
 import { createHash } from 'node:crypto';
 import { effectiveAllowNewSubagents } from '../afk/dispatch-guard.js';
-import {
-  buildSoloMasterOrchestratorLines,
-  buildSubagentDispatchContent,
-  classifyDispatchKind,
-  isSoloMasterOrchestratorMode,
-} from '../afk/master-orchestrator-discipline.js';
 import { parseCriteriaSummary, parseTodoItems } from './afk-state.js';
 import type { AfkSnapshot, PlannerAction, PlannerInput } from './types.js';
 
@@ -92,17 +86,10 @@ function buildDecisionRequirements(afk: AfkSnapshot): string[] {
   ];
 }
 
-function buildMasterOrchestratorSection(afk: AfkSnapshot): string[] {
-  const mode = afk.primarySummary?.mode ?? 'solo';
-  if (!isSoloMasterOrchestratorMode(mode)) return [];
-  return ['', ...buildSoloMasterOrchestratorLines()];
-}
-
 function buildInjectPrompt(input: PlannerInput, nextTodo: string | null, reason: string): string {
   const { config, state, afk } = input;
   const summary = afk.primarySummary;
   const criteria = parseCriteriaSummary(afk.criteriaText);
-  const soloMaster = isSoloMasterOrchestratorMode(summary?.mode ?? 'solo');
   const lines = [
     config.injectPrefix,
     '',
@@ -114,7 +101,6 @@ function buildInjectPrompt(input: PlannerInput, nextTodo: string | null, reason:
     '- 不向用户提问；在 allowlist / 授权范围内自行决断并继续。',
     '- 完成一个原子单元后 reply_message，然后立刻 wait_message。',
     '- 禁止空转 survey；每轮必须有可验证产物变化。',
-    ...buildMasterOrchestratorSection(afk),
     ...buildDecisionRequirements(afk),
     '',
     '## 项目根目录',
@@ -130,17 +116,9 @@ function buildInjectPrompt(input: PlannerInput, nextTodo: string | null, reason:
   } else if (nextTodo) {
     lines.push('', '## 本轮首选原子任务', nextTodo);
   } else if (afk.todoText) {
-    lines.push(
-      '',
-      '## TODO 摘要',
-      soloMaster
-        ? '读取 tasks/<taskId>/TODO.md（AFK 任务目录，非仓库源码），选择下一原子任务并 dispatch 子 Agent 执行。'
-        : '请读取项目 TODO 并选择下一项未完成、可验证、最小范围的原子任务。',
-    );
+    lines.push('', '## TODO 摘要', '请读取项目 TODO 并选择下一项未完成、可验证、最小范围的原子任务。');
   } else {
-    lines.push('', '## 任务', soloMaster
-      ? '继续编排：dispatch 子 Agent 推进原子单元，禁止主会话亲自读改写码。'
-      : '继续推进当前 AFK 目标，选择最小可验证的原子单元。');
+    lines.push('', '## 任务', '继续推进当前 AFK 目标，选择最小可验证的原子单元。');
   }
 
   if (criteria.length > 0) {
@@ -151,15 +129,11 @@ function buildInjectPrompt(input: PlannerInput, nextTodo: string | null, reason:
   lines.push(
     '',
     '## 收尾要求',
-    soloMaster
-      ? '1. dispatch 子 Agent（或汇总 AGENT_RESULT）→ 验证摘要 → DECISIONS.md（如有）→ reply_message'
-      : '1. 执行 → 验证 → 更新 DECISIONS.md（如有决策）→ reply_message 交付（含 status / 命令 / 验证证据）',
+    '1. 执行 → 验证 → 更新 DECISIONS.md（如有决策）→ reply_message 交付（含 status / 命令 / 验证证据）',
     '2. 立即 wait_message 等待下一条（不要结束 turn）',
   );
   if (forbidDispatch) {
     lines.push('3. Mode=go：禁止 list_subagents / dispatch_subagent_task；单主完成全部工作');
-  } else if (soloMaster) {
-    lines.push('3. Mode=solo：读码/改码/跑仓库验证命令一律 dispatch_subagent_task；主会话禁止 Read/Write/StrReplace 触达 projectRoot');
   } else {
     lines.push('3. 若有可并行调研/审查且子 Agent 空闲，可 dispatch_subagent_task');
   }
@@ -169,20 +143,14 @@ function buildInjectPrompt(input: PlannerInput, nextTodo: string | null, reason:
 function buildWakePrompt(input: PlannerInput): string {
   const { config, afk } = input;
   const summary = afk.primarySummary;
-  const soloMaster = isSoloMasterOrchestratorMode(summary?.mode ?? 'solo');
   const lines = [
     config.injectPrefix,
     '',
     '【唤醒】Rr 会话已离线或未在 wait_message。请立刻：',
     '1. 若已有 sessionId，直接 wait_message 恢复轮询（不要重新 register）',
-    soloMaster
-      ? '2. 读取 tasks/<taskId>/ 下 summary/TODO/CRITERIA/DECISIONS（非仓库源码），继续编排上一原子任务'
-      : '2. 读取 summary / TODO / CRITERIA / DECISIONS，继续上一原子任务',
-    soloMaster
-      ? '3. reply_message（dispatch 摘要 / AGENT_RESULT 验证）后立刻 wait_message'
-      : '3. reply_message（含 status / 命令 / 验证）后立刻 wait_message',
+    '2. 读取 summary / TODO / CRITERIA / DECISIONS，继续上一原子任务',
+    '3. reply_message（含 status / 命令 / 验证）后立刻 wait_message',
     ...formatSummarySection(afk),
-    ...buildMasterOrchestratorSection(afk),
     ...buildDecisionRequirements(afk),
   ];
   if (summary?.status === 'NEEDS_HUMAN') {
@@ -195,14 +163,6 @@ function buildWakePrompt(input: PlannerInput): string {
   return lines.join('\n');
 }
 
-function pickDispatchableTask(input: PlannerInput): string | null {
-  const currentUnit = input.afk.primarySummary?.current_unit;
-  if (currentUnit) return currentUnit;
-  const todos = parseTodoItems(input.afk.todoText);
-  return todos[0] ?? null;
-}
-
-/** @deprecated use pickDispatchableTask */
 function pickResearchTask(input: PlannerInput): string | null {
   const currentUnit = input.afk.primarySummary?.current_unit;
   if (currentUnit && /调研|审查|对比|排查|分析|research|audit|review/i.test(currentUnit)) {
@@ -301,23 +261,23 @@ export function planNextAction(input: PlannerInput, now = Date.now()): PlannerAc
     config.allowNewSubagents !== false,
   );
   const modeForbidsDispatch = !taskAllowsSubs || afk.primarySummary?.mode === 'go';
-  const soloMaster = isSoloMasterOrchestratorMode(afk.primarySummary?.mode ?? 'solo');
   if (config.autoDispatchSubagents && !needsHuman && !modeForbidsDispatch) {
     const idleSubagents = subagents.filter((agent) => agent.availability === 'idle');
-    const dispatchTask = soloMaster ? pickDispatchableTask(input) : pickResearchTask(input);
-    if (idleSubagents.length > 0 && dispatchTask) {
-      const kind = classifyDispatchKind(dispatchTask);
+    const research = pickResearchTask(input);
+    if (idleSubagents.length > 0 && research) {
       return {
         kind: 'dispatch',
         targetSessionId: idleSubagents[0]!.sessionId,
-        content: buildSubagentDispatchContent({
-          task: dispatchTask,
-          projectRoot: config.projectRoot,
-          kind,
-        }),
-        reason: soloMaster
-          ? `Mode=solo 派发${kind === 'research' ? '侦查' : '实现'}任务给 idle 子 Agent (${idleSubagents[0]!.name})`
-          : `并行派发调研任务给 idle 子 Agent (${idleSubagents[0]!.name})`,
+        content: [
+          '【子 Agent 任务 · 只读侦查 unless 主会话授权写】',
+          '',
+          research,
+          '',
+          '背景：主会话 AFK 挂机中；你负责并行完成上述调研/审查。',
+          '要求：每条结论附文件路径+行号或命令+真实输出；禁止套娃开子代理。',
+          `项目根：${config.projectRoot}`,
+        ].join('\n'),
+        reason: `并行派发调研任务给 idle 子 Agent (${idleSubagents[0]!.name})`,
       };
     }
   }

@@ -69,8 +69,6 @@ export interface RrAfkSummary {
 
 export interface RrAfkTaskIndex {
   active_tasks: string[];
-  /** Completed task ids retained for history / UI; preserved across index writes */
-  done_tasks?: string[];
   updated_at: string;
 }
 
@@ -89,8 +87,5 @@ export interface InitTaskArtifactsInput {
   tasks?: string;
   maxLoops?: number;
   activate?: boolean;
-  /** Admission cap checked atomically with activation under index lock. */
-  admissionCap?: number;
-  admissionForce?: boolean;
   mode?: RrAfkMode;
 }

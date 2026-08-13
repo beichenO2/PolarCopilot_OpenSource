@@ -18,7 +18,6 @@ import {
   writeState,
 } from './afk/index.js';
 import type { RrAfkMode, RrAfkSummary, RrAfkTaskIndex } from './afk/types.js';
-import { completeViaGate } from './afk/vnext/bridge.js';
 import { canSpawnAgent } from './afk/budget-gate.js';
 import {
   buildSoloMasterOrchestratorLines,
@@ -755,33 +754,8 @@ export async function resumeAfk(
   return { resumed, index: readIndex() };
 }
 
-export function doneAfk(
-  taskId: string,
-  opts?: { evidence?: { command: string; exitCode: number; salient: string } },
-): { done: RrAfkSummary; index: RrAfkTaskIndex; gate: { required_total: number; required_pass: number } } {
+export function doneAfk(taskId: string): { done: RrAfkSummary; index: RrAfkTaskIndex } {
   migrateLegacyFlagsIfNeeded();
-  const existing = readState(taskId);
-  if (!existing) throw new Error('afk_task_not_found');
-
-  // Completion gate — never mark DONE without frozen criteria + evidence (vNext).
-  const evidence =
-    opts?.evidence ??
-    (existing.last_verification &&
-    typeof existing.last_verification === 'object' &&
-    existing.last_verification !== null &&
-    'exit_code' in (existing.last_verification as object)
-      ? {
-          command: String((existing.last_verification as { command?: string }).command ?? existing.last_command ?? 'verify'),
-          exitCode: Number((existing.last_verification as { exit_code?: number }).exit_code ?? 1),
-          salient: String((existing.last_verification as { salient?: string }).salient ?? ''),
-        }
-      : undefined);
-
-  const { report } = completeViaGate(taskId, {
-    projectRoot: existing.project_root,
-    evidence,
-  });
-
   const state = markTaskDone(taskId);
   if (!state) throw new Error('afk_task_not_found');
   const index = readIndex();
@@ -790,11 +764,7 @@ export function doneAfk(
     rmSync(join(config.afkRoot, 'ACTIVE'), { force: true });
     rmSync(join(config.afkRoot, 'DONE'), { force: true });
   }
-  return {
-    done: readSummary(taskId)!,
-    index,
-    gate: { required_total: report.required_total, required_pass: report.required_pass },
-  };
+  return { done: readSummary(taskId)!, index };
 }
 
 export function setTaskHeartbeat(taskId: string, automationId: string): RrAfkSummary {

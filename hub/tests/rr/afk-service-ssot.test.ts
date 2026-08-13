@@ -86,12 +86,11 @@ describe('rr afk service ssot', () => {
     expect(store.getSession(result.sessionId).afkTaskId).toBe('knowlever-solo');
   });
 
-  it('oneClickAfk throws budget_spawn_deferred when spawn gate blocks after wait exhausted', async () => {
+  it('oneClickAfk throws budget_spawn_deferred when spawn gate blocks', async () => {
     const projectRoot = mkdtempSync(join(tmpdir(), 'rr-afk-budget-block-'));
     useTempAfkRoot(projectRoot);
     const store = new RrFileStore(mkdtempSync(join(tmpdir(), 'rr-afk-budget-store-')));
     roots.push(store.root);
-    process.env.RR_BUDGET_WAIT_MS = '0';
 
     vi.spyOn(budgetGate, 'canSpawnAgent').mockResolvedValue({
       allowed: false,
@@ -208,7 +207,7 @@ describe('rr afk service ssot', () => {
     expect(readSummary('knowlever-solo')?.allowlist).toEqual(['tests/a.test.ts']);
   });
 
-  it('tick injects continuation prompt to bound master session', async () => {
+  it('tick injects continuation prompt to bound master session', () => {
     const projectRoot = mkdtempSync(join(tmpdir(), 'rr-afk-tick-'));
     useTempAfkRoot(projectRoot);
     const store = new RrFileStore(mkdtempSync(join(tmpdir(), 'rr-afk-tick-store-')));
@@ -237,7 +236,7 @@ describe('rr afk service ssot', () => {
       updated_at: new Date().toISOString(),
     });
 
-    const tick = await tickAfk(store, 'tick-task');
+    const tick = tickAfk(store, 'tick-task');
     expect(tick.sessionId).toBe(main.sessionId);
     const history = store.getHistory(main.sessionId);
     expect(history.some((msg) => msg.content.includes('【Rr AFK · 续跑】'))).toBe(true);
@@ -267,7 +266,7 @@ describe('rr afk service ssot', () => {
     expect(status.todo).toBeDefined();
   });
 
-  it('pause and resume mutate ssot task status', async () => {
+  it('pause and resume mutate ssot task status', () => {
     const projectRoot = mkdtempSync(join(tmpdir(), 'rr-afk-pause-'));
     useTempAfkRoot(projectRoot);
     initTaskArtifacts({ taskId: 'pause-me', projectRoot, masterSessionId: null });
@@ -275,7 +274,7 @@ describe('rr afk service ssot', () => {
     pauseAfk('pause-me');
     expect(readSummary('pause-me')?.status).toBe('PAUSED');
 
-    await resumeAfk('pause-me');
+    resumeAfk('pause-me');
     expect(readSummary('pause-me')?.status).toBe('READY');
   });
 
@@ -480,94 +479,5 @@ describe('rr afk service ssot', () => {
       ([patch]) => 'allowNewSubagents' in patch || 'autoDispatchSubagents' in patch,
     );
     expect(subagentPatches).toHaveLength(0);
-  });
-
-  it('oneClickAfk supports multiple parallel tasks with dedicated master sessions', async () => {
-    const projectRoot = mkdtempSync(join(tmpdir(), 'rr-afk-parallel-'));
-    useTempAfkRoot(projectRoot);
-    const store = new RrFileStore(mkdtempSync(join(tmpdir(), 'rr-afk-parallel-store-')));
-    roots.push(store.root);
-
-    let spawnCount = 0;
-    const spawnEnqueue = vi.fn(async () => {
-      spawnCount += 1;
-      return { jobId: `job-${spawnCount}` };
-    });
-    vi.spyOn(polarService, 'startOrchestratorService').mockResolvedValue({
-      enabled: true,
-      polarprocess: null,
-      running: true,
-    });
-    vi.spyOn(polarBudget, 'fetchPolarBudget').mockResolvedValue({
-      ok: true,
-      recommended_jobs: 8,
-      reason: 'test',
-    });
-    vi.spyOn(budgetGate, 'canSpawnAgent').mockResolvedValue({
-      allowed: true,
-      reason: 'within_recommended_jobs',
-      recommended_jobs: 8,
-      budget: { ok: true, recommended_jobs: 8, pressure_level: 'plenty', reason: 'test' },
-    });
-
-    const resultA = await oneClickAfk(store, {
-      taskSlug: 'parallel-a',
-      projectRoot,
-      startOrchestrator: false,
-    }, { spawnEnqueue });
-    const resultB = await oneClickAfk(store, {
-      taskSlug: 'parallel-b',
-      projectRoot,
-      startOrchestrator: false,
-    }, { spawnEnqueue });
-
-    expect(resultA.sessionId).not.toBe(resultB.sessionId);
-    expect(readSummary('parallel-a')?.master_session_id).toBe(resultA.sessionId);
-    expect(readSummary('parallel-b')?.master_session_id).toBe(resultB.sessionId);
-
-    const status = await readAfkStatus(projectRoot);
-    expect(status.index.active_tasks.sort()).toEqual(['parallel-a', 'parallel-b']);
-    expect(status.activeTasks.map((item) => item.taskId).sort()).toEqual(['parallel-a', 'parallel-b']);
-    expect(status.activeTasks.find((item) => item.taskId === 'parallel-a')?.masterSessionId).toBe(resultA.sessionId);
-    expect(status.activeTasks.find((item) => item.taskId === 'parallel-b')?.masterSessionId).toBe(resultB.sessionId);
-    expect(spawnEnqueue).toHaveBeenCalledTimes(2);
-  });
-
-  it('rejects oneClickAfk when explicit sessionId is bound to another task', async () => {
-    const projectRoot = mkdtempSync(join(tmpdir(), 'rr-afk-bound-'));
-    useTempAfkRoot(projectRoot);
-    const store = new RrFileStore(mkdtempSync(join(tmpdir(), 'rr-afk-bound-store-')));
-    roots.push(store.root);
-
-    vi.spyOn(polarService, 'startOrchestratorService').mockResolvedValue({
-      enabled: true,
-      polarprocess: null,
-      running: true,
-    });
-    vi.spyOn(polarBudget, 'fetchPolarBudget').mockResolvedValue({
-      ok: true,
-      recommended_jobs: 8,
-      reason: 'test',
-    });
-    vi.spyOn(budgetGate, 'canSpawnAgent').mockResolvedValue({
-      allowed: true,
-      reason: 'within_recommended_jobs',
-      recommended_jobs: 8,
-      budget: { ok: true, recommended_jobs: 8, pressure_level: 'plenty', reason: 'test' },
-    });
-
-    const first = await oneClickAfk(store, {
-      taskSlug: 'owner-task',
-      projectRoot,
-      startOrchestrator: false,
-    });
-
-    await expect(oneClickAfk(store, {
-      taskSlug: 'intruder-task',
-      projectRoot,
-      sessionId: first.sessionId,
-      spawnIfNeeded: false,
-      startOrchestrator: false,
-    })).rejects.toThrow('session_bound_to_other_task');
   });
 });

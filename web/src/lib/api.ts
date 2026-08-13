@@ -1,4 +1,5 @@
 import type { Agent, Prompt, HubEvent, Task, AgentsSummary, ServiceHealth, ProjectData, EcoService, PortEntry, DeviceResource } from '../types/hub'
+import type { PilotStatusSummary, LobsterStatus, LobsterEvent } from '../types/pilot-status'
 import type {
   RrSession,
   RrSessionDetail,
@@ -399,6 +400,15 @@ export const api = {
       del<{ ok: boolean }>(`/api/ui/prolusion/${id}`),
   },
 
+  polarclaw: {
+    models: () => get<{ models: string[]; intent_models: Record<string, string> }>('/api/ui/polarclaw/models'),
+    start: (model?: string) =>
+      post<{ session_id: string; prompt_id: string; model: string }>('/api/ui/polarclaw/start', { model }),
+    forward: (promptId: string) =>
+      post<{ prompt_id: string; content: string; model: string }>(`/api/ui/polarclaw/forward/${promptId}`),
+    endSession: (sessionId: string) =>
+      del<{ ok: boolean }>(`/api/ui/polarclaw/session/${sessionId}`),
+  },
   rr: {
     sessions: () => get<{ sessions: RrSession[] }>('/api/ui/rr/sessions'),
     createSession: (data: {
@@ -486,20 +496,12 @@ export const api = {
     afkReport: () => get<{ ok: true; items: RrAfkDecisionsReportItem[] }>('/api/ui/rr/afk/report'),
     afkOrchestratorStart: () => post<{ ok: true; enabled: boolean; running: boolean }>('/api/ui/rr/afk/orchestrator/start'),
     afkOrchestratorHalt: () => post<{ ok: true; enabled: boolean; running: boolean }>('/api/ui/rr/afk/orchestrator/halt'),
-    afkVnextTasks: () =>
-      get<{
-        ok: true
-        active: Array<Record<string, unknown>>
-        tasks: Array<Record<string, unknown>>
-        exec_concurrency_hint: number
-      }>('/api/ui/rr/afk/vnext/tasks'),
-    afkVnextCreate: (data: { goal: string; projectRoot: string; mode?: 'start' | 'solo' }) =>
-      post<{ ok: true; task: Record<string, unknown> }>('/api/ui/rr/afk/vnext/tasks', data),
-    afkVnextCompletion: (taskId: string) =>
-      get<{ gate_ok: boolean; gaps: unknown[]; required_total: number; required_pass: number }>(
-        `/api/ui/rr/afk/vnext/tasks/${encodeURIComponent(taskId)}/completion`,
-      ),
   },
+  pilotStatus: {
+    summary: () => get<PilotStatusSummary>('/api/ui/pilot-status'),
+    project: (id: string) => get<LobsterStatus & { events: LobsterEvent[] }>(`/api/ui/pilot-status/${id}`),
+  },
+
   alignment: {
     list: (status?: string) => get<AlignmentDoc[]>(`/api/ui/alignment${status ? `?status=${status}` : ''}`),
     get: (id: string) => get<AlignmentDoc>(`/api/ui/alignment/${id}`),

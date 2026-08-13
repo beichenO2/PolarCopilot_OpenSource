@@ -1,11 +1,11 @@
-# Rr AFK · 总进度与缺口（2026-07-31）
+# Rr AFK · 总进度与缺口（2026-07-30 夜）
 
 > 权威状态板。Canvas：工作区 `canvases/rr-afk-status.canvas.tsx`。
 
 ## 一句话
 
-**Phase-1～4 DONE**；另加 **Budget 哲学**（pressure + pause 推荐 + spawn gate + shedder），本轮**未重启**权威服务。  
-Live `:11060` 仍跑旧二进制 → `pressure_level` / pause API 待用户自行 reload PolarBudget 后生效。
+**Phase-1～4 已落地并合入分支**（`15435d6` 基线 + Phase-4 harden 提交）。  
+Rr AFK 为唯一 SSoT；三模式接线；E2E/冒烟；Go dispatch **硬拒**；任务级 `allow_new_subagents`；skills 已入库。
 
 ## 阶段总览
 
@@ -15,7 +15,6 @@ Live `:11060` 仍跑旧二进制 → `pressure_level` / pause API 待用户自�
 | Phase-2 三模式 + A→B | **DONE** |
 | Phase-3 L1/L2 E2E C1–C10 | **DONE** |
 | Phase-4 硬化 + 合入 + 真机短跑 | **DONE**（见 phase4-CRITERIA） |
-| Budget 哲学（pause/resume） | **DONE（代码+单测）** · live API `NOT RUN` 待 reload |
 
 ## Phase-4 证据摘要
 
@@ -59,38 +58,17 @@ AFK_MODE=go npm run smoke:afk-short-run
 
 PR：https://github.com/beichenO2/PolarCopilot/pull/4
 
-## Budget 哲学（2026-07-31）
-
-| ID | 结果 |
-|----|------|
-| C1–C3 PolarBudget | PASS 单测 32/32；live `NOT RUN`（禁重启） |
-| C4–C7 Hub gate/shedder | PASS · vitest `tests/rr` **141/141** |
-| C8–C9 skills + 未重启权威 | PASS · `verify-skills`；证据见下 |
-
-证据：`docs/superpowers/evidence/2026-07-31-afk-budget-philosophy.md`  
-计划 / 判据：`…/2026-07-31-afk-budget-philosophy.md` · `…/2026-07-31-afk-budget-CRITERIA.md`
-
-哲学摘要：先钳并发 → critical 再 Process **stop** pausable → plenty 再 **start** 恢复；权威永不 pause。
-
-## Solo 无限进化（纪律）
-
-- **子计划 ≠ 终局**：Budget 哲学等单元 PASS 后必须回到 `afk/current` 终极 CRITERIA，禁止交付收工。
-- skills：`afk-solo` / `iteration-loop` / `workflow-process` 已写死「无限进化到终极 CRITERIA」。
-- 本轮终局任务：`polaride-desktop-product-v1` → **DONE** · `SHIPPABLE_LOCAL_MAC_UNSIGNED`（`~/.rr-cursor/afk/DONE`；ACTIVE 已清）。
-
 ## 仍可选 / 非阻塞
 
 | 项 | 说明 |
 |----|------|
-| reload PolarBudget | 经 PolarProcess 重启一次以加载 pressure/pause API（用户择时） |
-| Developer ID 签名 / Windows / 自动更新 | 新里程碑，未武装 ACTIVE |
-| 推远程 / PR | 本轮改动未要求则不 push |
+| 推远程 / PR | 分支 `dev/hubweb-prompts-ui` 本地 ahead；未要求则不 push |
+| 真 Cursor Agent 长跑业务 | 短跑已证明 inject/status；长跑属运行时使用而非门禁 |
+| 其它 pc-* skills 入库 | 已入库 afk* / pc / rr-orchestrator；其余仍 untracked（可选） |
 | HTTP list_subagents go 门闩 | MCP 已拦；HTTP GET 子列表未拦（Minor） |
 
 ## 相关路径
 
 - Phase-4 计划 / 判据：`…/phase4-harden.md` · `…/phase4-CRITERIA.md`
-- Budget：`hub/src/rr/afk/budget-shedder.ts` · `PolarBudget/src/pressure.ts`
 - 硬拒：`hub/src/rr/afk/dispatch-guard.ts`
 - 短跑：`scripts/smoke-afk-short-run.sh`
-- skills：`polar-budget.md` · `workflow-process.md`

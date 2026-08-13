@@ -7,21 +7,15 @@ import {
   buildRrLaunchPrompt,
   buildRrSessionForest,
   loadRrLastReadMap,
-  partitionSessionsByLiveness,
-  partitionSubagentsByLiveness,
   saveRrLastReadMap,
   sessionNeedsAttention,
   shouldNotifyRr,
-  sortSessionsByUrgency,
-  sortSubagentsByUrgency,
   statusLabel,
   statusTone,
 } from '../lib/rr'
 import {
+  formatAfkSummaryLine,
   formatAfkTaskStatusLabel,
-  formatActiveAfkTasksLabel,
-  listHistoryAfkSummaries,
-  listNowAfkSummaries,
   needsHumanReview,
   pickPrimaryAfkSummary,
 } from '../lib/rr-afk'
@@ -202,12 +196,6 @@ export function RrPage() {
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set())
   /** 进程树展开键；默认折叠，不占垂直空间 */
   const [expandedProcessKeys, setExpandedProcessKeys] = useState<Set<string>>(new Set())
-  /** Sidebar live filter: default live-only per DESIGN */
-  const [sidebarFilter, setSidebarFilter] = useState<'live' | 'all'>('live')
-  const [offlineSectionExpanded, setOfflineSectionExpanded] = useState(false)
-  const [offlineDispatchSubagentsExpanded, setOfflineDispatchSubagentsExpanded] = useState(false)
-  const [offlineNowSubagentsExpanded, setOfflineNowSubagentsExpanded] = useState(false)
-  const [historyExpanded, setHistoryExpanded] = useState(false)
   const [annotations, setAnnotations] = useState<MessageAnnotation[]>([])
   const [annotating, setAnnotating] = useState<{ text: string; messageId: string } | null>(null)
   const [annotationNote, setAnnotationNote] = useState('')
@@ -220,7 +208,6 @@ export function RrPage() {
   const [grantBusy, setGrantBusy] = useState(false)
   const [afkInfo, setAfkInfo] = useState('')
   const [afkMode, setAfkMode] = useState<RrAfkMode>('solo')
-  const [afkTaskSlug, setAfkTaskSlug] = useState('')
   const [orchestratorConfig, setOrchestratorConfig] = useState<RrOrchestratorConfig | null>(null)
   const [orchestratorConfigBusy, setOrchestratorConfigBusy] = useState(false)
   const transcriptRef = useRef<HTMLDivElement>(null)
@@ -424,81 +411,12 @@ export function RrPage() {
     [afkStatus],
   )
 
-  const activeAfkTaskCount = useMemo(
-    () => formatActiveAfkTasksLabel(afkStatus),
-    [afkStatus],
-  )
-
-  const nowAfkSummaries = useMemo(
-    () => listNowAfkSummaries(afkStatus),
-    [afkStatus],
-  )
-
-  const historyAfkSummaries = useMemo(
-    () => listHistoryAfkSummaries(afkStatus),
-    [afkStatus],
-  )
-
-  const livenessPartition = useMemo(
-    () => partitionSessionsByLiveness(sessions),
-    [sessions],
-  )
-
-  const sidebarSourceSessions = useMemo(() => {
-    const source = sidebarFilter === 'live' ? livenessPartition.live : sessions
-    return sortSessionsByUrgency(source)
-  }, [sidebarFilter, livenessPartition.live, sessions])
-
-  const sortedOfflineSessions = useMemo(
-    () => sortSessionsByUrgency(livenessPartition.offline),
-    [livenessPartition.offline],
-  )
-
-  const subagentLivenessPartition = useMemo(
-    () => partitionSubagentsByLiveness(subagents),
-    [subagents],
-  )
-
-  const sortedLiveSubagents = useMemo(
-    () => sortSubagentsByUrgency(subagentLivenessPartition.live),
-    [subagentLivenessPartition.live],
-  )
-
-  const sortedOfflineSubagents = useMemo(
-    () => sortSubagentsByUrgency(subagentLivenessPartition.offline),
-    [subagentLivenessPartition.offline],
-  )
-
-  const primaryMasterSessionId = useMemo(
-    () => primaryAfkSummary?.master_session_id ?? afkStatus?.orchestrator.masterSessionId ?? selectedId,
-    [afkStatus?.orchestrator.masterSessionId, primaryAfkSummary?.master_session_id, selectedId],
-  )
-
   const humanReviewSummaries = useMemo(
     () => (afkStatus?.summaries ?? []).filter((summary) => needsHumanReview(summary)),
     [afkStatus?.summaries],
   )
 
-  const sessionForest = useMemo(() => buildRrSessionForest(sidebarSourceSessions), [sidebarSourceSessions])
-
-  const offlineForest = useMemo(
-    () => buildRrSessionForest(sortedOfflineSessions),
-    [sortedOfflineSessions],
-  )
-
-  const activeTaskGroup = useMemo(() => {
-    if (!primaryMasterSessionId) return null
-    const byMain = sessionForest.groups.find((group) => group.main.sessionId === primaryMasterSessionId)
-    if (byMain) return byMain
-    return sessionForest.groups.find((group) =>
-      group.children.some((child) => child.sessionId === primaryMasterSessionId),
-    ) ?? null
-  }, [primaryMasterSessionId, sessionForest.groups])
-
-  const secondaryNowSummaries = useMemo(
-    () => nowAfkSummaries.filter((summary) => summary.task_id !== primaryAfkSummary?.task_id),
-    [nowAfkSummaries, primaryAfkSummary?.task_id],
-  )
+  const sessionForest = useMemo(() => buildRrSessionForest(sessions), [sessions])
 
   // 选中子 Agent 时自动展开其所属主进程，避免折叠后找不到当前会话
   useEffect(() => {
@@ -592,21 +510,18 @@ export function RrPage() {
         spawnIfNeeded: !selected,
         force: false,
         mode: afkMode,
-        taskSlug: afkTaskSlug.trim() || undefined,
       })
       setAfkStatus(result.status)
       setAfkInfo(
-        `一键 AFK 就绪 · 模式 ${formatAfkModeLabel(afkMode)} · 任务 ${result.armed.taskId} · 主会话 ${result.sessionId.slice(0, 12)}… · ${formatActiveAfkTasksLabel(result.status)} · orchestrator ${result.orchestrator.running ? '运行中' : '已配置'}`,
+        `一键 AFK 就绪 · 模式 ${formatAfkModeLabel(afkMode)} · 任务 ${result.armed.taskId} · 主会话 ${result.sessionId.slice(0, 12)}… · orchestrator ${result.orchestrator.running ? '运行中' : '已配置'}`,
       )
       if (result.sessionId) setSelectedId(result.sessionId)
       // go 会 PATCH allowNewSubagents=false；必须同步左上角开关，避免 UI/Hub 不一致
       await Promise.all([refresh(), refreshOrchestratorConfig()])
     } catch (cause) {
       const message = cause instanceof Error ? cause.message : String(cause)
-      if (message.includes('afk_budget_capacity')) {
-        setError('已达 PolarBudget 并发上限（fleet-10 / recommended_jobs）。请等待其它任务 done 释放名额，或缩小并行规模。')
-      } else if (message.includes('afk_already_active')) {
-        setError('该 task slug 已在 active_tasks 中。请换 task slug，或使用 force 重绑同一任务。')
+      if (message.includes('afk_already_active')) {
+        setError('已有 AFK 任务在跑，请先停止 orchestrator 或传 force 重新设为 AFK active')
       } else if (message.includes('no_master_session')) {
         setError('无可用主会话，请先新建进程或启动 Cursor Agent')
       } else {
@@ -747,43 +662,11 @@ export function RrPage() {
   }
 
   const toggleSelectAll = () => {
-    const visibleIds = sidebarSourceSessions.map((session) => session.sessionId)
     setSelectedIds((current) => {
-      if (visibleIds.length > 0 && visibleIds.every((id) => current.has(id))) return new Set()
-      return new Set(visibleIds)
+      if (current.size === sessions.length) return new Set()
+      return new Set(sessions.map((session) => session.sessionId))
     })
   }
-
-  const renderSessionForest = (
-    forest: ReturnType<typeof buildRrSessionForest>,
-    emptyHint: string,
-  ) => (
-    <>
-      {forest.groups.map((group) => {
-        const expanded = expandedProcessKeys.has(group.key)
-        const hasChildren = group.children.length > 0
-        return (
-          <div key={group.key} className="space-y-0.5">
-            {renderSessionRow(group.main, {
-              depth: 0,
-              expand: hasChildren
-                ? {
-                    expanded,
-                    childCount: group.children.length,
-                    onToggle: () => toggleProcessExpand(group.key),
-                  }
-                : undefined,
-            })}
-            {hasChildren && expanded && group.children.map((child) => renderSessionRow(child, { depth: 1 }))}
-          </div>
-        )
-      })}
-      {forest.singles.map((session) => renderSessionRow(session, { depth: 0 }))}
-      {forest.groups.length === 0 && forest.singles.length === 0 && (
-        <div className="p-3 text-center text-[10px] leading-5 text-hub-text-muted">{emptyHint}</div>
-      )}
-    </>
-  )
 
   const beginAnnotate = useCallback((messageId: string, text: string) => {
     const trimmed = text.trim()
@@ -1036,7 +919,7 @@ export function RrPage() {
             <label className="flex cursor-pointer items-center gap-1.5">
               <input
                 type="checkbox"
-                checked={sidebarSourceSessions.length > 0 && sidebarSourceSessions.every((session) => selectedIds.has(session.sessionId))}
+                checked={sessions.length > 0 && selectedIds.size === sessions.length}
                 onChange={toggleSelectAll}
                 className="rounded border-hub-border"
               />
@@ -1052,60 +935,28 @@ export function RrPage() {
               批量删除
             </button>
           </div>
-          <div className="flex flex-wrap gap-1.5 pt-1">
-            <button
-              type="button"
-              onClick={() => setSidebarFilter('live')}
-              className={clsx(
-                'rounded-full border px-2.5 py-0.5 text-[9px] font-medium transition-colors',
-                sidebarFilter === 'live'
-                  ? 'border-hub-green/45 bg-hub-green/10 text-hub-green'
-                  : 'border-hub-border text-hub-text-muted hover:border-hub-border/80',
-              )}
-            >
-              Live only ●
-            </button>
-            <button
-              type="button"
-              onClick={() => setSidebarFilter('all')}
-              className={clsx(
-                'rounded-full border px-2.5 py-0.5 text-[9px] font-medium transition-colors',
-                sidebarFilter === 'all'
-                  ? 'border-cyan-400/40 bg-cyan-400/10 text-cyan-200'
-                  : 'border-hub-border text-hub-text-muted hover:border-hub-border/80',
-              )}
-            >
-              全部
-            </button>
-          </div>
         </div>
-        <div className="min-h-0 flex-1 space-y-2 overflow-y-auto p-2">
-          {sidebarFilter === 'live' && (
-            <p className="px-1 text-[9px] font-semibold uppercase tracking-[0.14em] text-hub-text-muted">
-              Living ({livenessPartition.live.length})
-            </p>
-          )}
-          {renderSessionForest(
-            sessionForest,
-            sidebarFilter === 'live' ? '暂无活体 Agent' : '点击「新建进程」：主/子 Agent 按队列逐个 spawn',
-          )}
-          {sidebarFilter === 'live' && sortedOfflineSessions.length > 0 && (
-            <div className="border-t border-hub-border/60 pt-2">
-              <button
-                type="button"
-                onClick={() => setOfflineSectionExpanded((current) => !current)}
-                className="flex w-full items-center gap-2 px-1 py-1 text-left text-[9px] font-semibold uppercase tracking-[0.14em] text-hub-text-muted hover:text-hub-text"
-              >
-                <span>{offlineSectionExpanded ? '▾' : '▸'}</span>
-                <span>Offline ({sortedOfflineSessions.length})</span>
-              </button>
-              {offlineSectionExpanded && (
-                <div className="mt-1 space-y-0.5 opacity-80">
-                  {renderSessionForest(offlineForest, '无离线 Agent')}
-                </div>
-              )}
-            </div>
-          )}
+        <div className="min-h-0 flex-1 space-y-1 overflow-y-auto p-2">
+          {sessionForest.groups.map((group) => {
+            const expanded = expandedProcessKeys.has(group.key)
+            const hasChildren = group.children.length > 0
+            return (
+              <div key={group.key} className="space-y-0.5">
+                {renderSessionRow(group.main, {
+                  depth: 0,
+                  expand: hasChildren
+                    ? {
+                        expanded,
+                        childCount: group.children.length,
+                        onToggle: () => toggleProcessExpand(group.key),
+                      }
+                    : undefined,
+                })}
+                {hasChildren && expanded && group.children.map((child) => renderSessionRow(child, { depth: 1 }))}
+              </div>
+            )
+          })}
+          {sessionForest.singles.map((session) => renderSessionRow(session, { depth: 0 }))}
           {sessions.length === 0 && (
             <div className="p-5 text-center text-xs leading-6 text-hub-text-muted">
               点击「新建进程」：主/子 Agent 按队列逐个 spawn，避免同时抢 MCP
@@ -1154,40 +1005,48 @@ export function RrPage() {
           )}
         </header>
 
-        <div className="shrink-0 border-b border-hub-border bg-hub-surface/40 px-5 py-3">
-          <div className="flex flex-wrap items-center justify-between gap-2">
-            <div className="flex flex-wrap items-center gap-2">
-              <h3 className="text-[11px] font-semibold text-hub-text">NOW · Active Task</h3>
+        <div className="shrink-0 border-b border-hub-border bg-hub-surface/40 px-5 py-2.5">
+          <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
+            <div className="flex min-w-0 flex-1 flex-wrap items-center gap-x-3 gap-y-1 text-[10px] text-hub-text-muted">
+              <span className="font-semibold text-hub-text">AFK</span>
               <span className={clsx(
-                'rounded-full border px-2 py-0.5 text-[9px]',
-                sidebarFilter === 'live'
-                  ? 'border-hub-green/40 text-hub-green'
-                  : 'border-hub-border text-hub-text-muted',
-              )}>
-                {sidebarFilter === 'live' ? 'Live only' : 'All agents'}
-              </span>
-              <span className={clsx(
-                'rounded-full border px-2 py-0.5 text-[9px]',
+                'rounded-full border px-2 py-0.5',
                 afkStatus?.active ? 'border-hub-green/40 text-hub-green' : 'border-hub-border text-hub-text-muted',
               )}>
                 {afkStatus?.active ? 'AFK active' : 'AFK inactive'}
               </span>
-              {afkStatus?.active && (
-                <span className="rounded-full border border-violet-400/35 bg-violet-400/10 px-2 py-0.5 font-mono text-[9px] text-violet-100">
-                  {activeAfkTaskCount}
+              {afkStatus?.paused && <span className="text-amber-300">已暂停</span>}
+              {primaryAfkSummary && (
+                <>
+                  <span className="font-mono text-hub-text">{primaryAfkSummary.task_id}</span>
+                  <span className={clsx('rounded-full border px-2 py-0.5', afkTaskStatusTone(primaryAfkSummary.status))}>
+                    {formatAfkTaskStatusLabel(primaryAfkSummary.status)}
+                  </span>
+                  {primaryAfkSummary.mode && (
+                    <span className="rounded-full border border-violet-400/35 bg-violet-400/10 px-2 py-0.5 text-violet-200">
+                      {formatAfkModeLabel(primaryAfkSummary.mode)}
+                    </span>
+                  )}
+                  {primaryAfkSummary.current_unit && (
+                    <span>单元 {primaryAfkSummary.current_unit}</span>
+                  )}
+                  <span>rev {primaryAfkSummary.plan_revision}</span>
+                  <span>loop {primaryAfkSummary.loop}/{afkStatus?.maxLoops ?? 40}</span>
+                </>
+              )}
+              {!primaryAfkSummary && (
+                <span>轮次 {afkStatus?.loopCount ?? 0}/{afkStatus?.maxLoops ?? 40}</span>
+              )}
+              <span>TODO {afkStatus ? `${afkStatus.todo.done}/${afkStatus.todo.total}` : '—'}</span>
+              <span>Orchestrator {afkStatus ? formatAfkOrchestrator(afkStatus.orchestrator) : '—'}</span>
+              <span>末次 inject {formatAfkLastInject(afkStatus?.orchestrator.lastInjectAt ?? null)}</span>
+              {afkStatus?.orchestrator.lastAction && (
+                <span className="truncate" title={afkStatus.orchestrator.lastAction}>
+                  动作 {afkStatus.orchestrator.lastAction}
                 </span>
               )}
             </div>
             <div className="flex flex-wrap items-center gap-2">
-              <input
-                type="text"
-                value={afkTaskSlug}
-                disabled={afkBusy || busy}
-                onChange={(event) => setAfkTaskSlug(event.target.value)}
-                placeholder="task slug（可选）"
-                aria-label="AFK task slug"
-                className="min-w-[8rem] rounded-lg border border-hub-border bg-hub-bg px-2 py-1.5 font-mono text-[10px] text-hub-text placeholder:text-hub-text-muted disabled:opacity-35"
-              />
               <select
                 value={afkMode}
                 disabled={afkBusy || busy}
@@ -1209,6 +1068,11 @@ export function RrPage() {
               >
                 一键AFK
               </button>
+              {afkMode === 'go' && (
+                <span className="text-[10px] text-amber-300/90">
+                  Go：禁止新建 Subagent（已锁定）
+                </span>
+              )}
               <button
                 type="button"
                 disabled={afkBusy}
@@ -1228,130 +1092,23 @@ export function RrPage() {
             </div>
           </div>
 
-          {primaryAfkSummary ? (
-            <div className="mt-3 rounded-lg border border-cyan-400/30 bg-hub-bg/50 p-3">
-              <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
-                <span className="font-mono text-xs font-semibold text-hub-text">{primaryAfkSummary.task_id}</span>
-                <span className={clsx('rounded-full border px-2 py-0.5 text-[9px]', afkTaskStatusTone(primaryAfkSummary.status))}>
-                  {formatAfkTaskStatusLabel(primaryAfkSummary.status)}
+          {(afkStatus?.summaries?.length ?? 0) > 1 && (
+            <div className="mt-2 flex flex-wrap gap-1.5">
+              {afkStatus!.summaries.map((summary) => (
+                <span
+                  key={summary.task_id}
+                  className={clsx(
+                    'rounded-md border px-2 py-0.5 font-mono text-[9px]',
+                    summary.task_id === primaryAfkSummary?.task_id
+                      ? 'border-cyan-400/40 bg-cyan-400/10 text-cyan-100'
+                      : 'border-hub-border text-hub-text-muted',
+                  )}
+                  title={formatAfkSummaryLine(summary)}
+                >
+                  {formatAfkSummaryLine(summary)}
                 </span>
-                {primaryAfkSummary.mode && (
-                  <span className="rounded-full border border-violet-400/35 bg-violet-400/10 px-2 py-0.5 text-[9px] text-violet-200">
-                    {formatAfkModeLabel(primaryAfkSummary.mode)}
-                  </span>
-                )}
-                {primaryAfkSummary.current_unit && (
-                  <span className="text-[10px] text-hub-text-muted">单元 {primaryAfkSummary.current_unit}</span>
-                )}
-                <span className="text-[10px] text-hub-text-muted">rev {primaryAfkSummary.plan_revision}</span>
-                <span className="text-[10px] text-hub-text-muted">loop {primaryAfkSummary.loop}/{afkStatus?.maxLoops ?? 40}</span>
-              </div>
-              <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-[10px] text-hub-text-muted">
-                <span>TODO {afkStatus ? `${afkStatus.todo.done}/${afkStatus.todo.total}` : '—'}</span>
-                <span>Orchestrator {afkStatus ? formatAfkOrchestrator(afkStatus.orchestrator) : '—'}</span>
-                <span>末次 inject {formatAfkLastInject(afkStatus?.orchestrator.lastInjectAt ?? null)}</span>
-                {afkStatus?.orchestrator.lastAction && (
-                  <span className="truncate" title={afkStatus.orchestrator.lastAction}>
-                    动作 {afkStatus.orchestrator.lastAction}
-                  </span>
-                )}
-                {afkStatus?.paused && <span className="text-amber-300">已暂停</span>}
-              </div>
-              {afkStatus?.todo.pendingItems.length ? (
-                <p className="mt-2 truncate text-[10px] text-hub-text-muted" title={afkStatus.todo.pendingItems.join(' · ')}>
-                  下一项 TODO：{afkStatus.todo.pendingItems[0]}
-                </p>
-              ) : null}
-
-              {(activeTaskGroup || subagents.length > 0) && (
-                <div className="mt-3 space-y-1.5 border-l-2 border-violet-400/25 pl-3">
-                  <p className="text-[9px] font-semibold uppercase tracking-[0.12em] text-hub-text-muted">Subagents</p>
-                  {activeTaskGroup && (
-                    <div className="rounded-md border border-hub-border/70 bg-hub-surface/40 px-2.5 py-2">
-                      <div className="flex items-center gap-2">
-                        <span className={clsx(
-                          'h-1.5 w-1.5 rounded-full',
-                          activeTaskGroup.main.status === 'offline' ? 'bg-hub-text-muted' : activeTaskGroup.main.status === 'working' ? 'bg-hub-accent' : 'bg-hub-green',
-                        )} />
-                        <span className="text-[10px] font-medium text-hub-text">{activeTaskGroup.main.title || activeTaskGroup.main.name}</span>
-                        <span className="text-[9px] text-hub-text-muted">{statusLabel(activeTaskGroup.main.status)}</span>
-                        <span className="ml-auto rounded bg-hub-border/50 px-1.5 py-0.5 text-[8px] text-hub-text-muted">MASTER</span>
-                      </div>
-                      {activeTaskGroup.children.map((child) => (
-                        <div key={child.sessionId} className="ml-4 mt-1.5 flex items-center gap-2 border-l border-violet-400/20 pl-2">
-                          <span className={clsx(
-                            'h-1.5 w-1.5 rounded-full',
-                            child.status === 'offline' ? 'bg-hub-text-muted' : child.status === 'working' ? 'bg-hub-accent' : 'bg-hub-green',
-                          )} />
-                          <span className="min-w-0 flex-1 truncate text-[10px] text-hub-text">{child.title || child.name}</span>
-                          <span className="text-[9px] text-hub-text-muted">{statusLabel(child.status)}</span>
-                        </div>
-                      ))}
-                    </div>
-                  )}
-                  {sortedLiveSubagents.filter((agent) => agent.sessionId !== activeTaskGroup?.main.sessionId).map((agent) => (
-                    <div key={agent.sessionId} className="flex items-center gap-2 rounded-md border border-hub-border/60 bg-hub-bg/40 px-2.5 py-1.5">
-                      <span className={clsx(
-                        'h-1.5 w-1.5 rounded-full',
-                        agent.availability === 'busy' ? 'bg-hub-accent' : 'bg-hub-green',
-                      )} />
-                      <span className="min-w-0 flex-1 truncate text-[10px] text-hub-text">{agent.name}</span>
-                      <span className={clsx(
-                        'text-[9px]',
-                        agent.availability === 'idle' ? 'text-hub-green' : agent.availability === 'busy' ? 'text-hub-accent' : 'text-hub-text-muted',
-                      )}>
-                        {agent.availability}
-                      </span>
-                      {agent.activeTask?.progress && (
-                        <span className="text-[9px] text-hub-text-muted">
-                          {agent.activeTask.progress.percent ?? '?'}%
-                        </span>
-                      )}
-                    </div>
-                  ))}
-                  {sortedOfflineSubagents.length > 0 && (
-                    <div className="border-t border-hub-border/40 pt-1">
-                      <button
-                        type="button"
-                        onClick={() => setOfflineNowSubagentsExpanded((current) => !current)}
-                        className="flex w-full items-center gap-2 py-0.5 text-left text-[9px] font-semibold uppercase tracking-[0.12em] text-hub-text-muted hover:text-hub-text"
-                      >
-                        <span>{offlineNowSubagentsExpanded ? '▾' : '▸'}</span>
-                        <span>Offline ({sortedOfflineSubagents.length})</span>
-                      </button>
-                      {offlineNowSubagentsExpanded && (
-                        <div className="mt-1 space-y-1 opacity-80">
-                          {sortedOfflineSubagents.filter((agent) => agent.sessionId !== activeTaskGroup?.main.sessionId).map((agent) => (
-                            <div key={agent.sessionId} className="flex items-center gap-2 rounded-md border border-hub-border/60 bg-hub-bg/40 px-2.5 py-1.5">
-                              <span className="h-1.5 w-1.5 rounded-full bg-hub-text-muted" />
-                              <span className="min-w-0 flex-1 truncate text-[10px] text-hub-text">{agent.name}</span>
-                              <span className="text-[9px] text-hub-text-muted">{agent.availability}</span>
-                            </div>
-                          ))}
-                        </div>
-                      )}
-                    </div>
-                  )}
-                </div>
-              )}
-
-              {secondaryNowSummaries.length > 0 && (
-                <div className="mt-3 space-y-1 border-t border-hub-border/60 pt-2">
-                  <p className="text-[9px] font-semibold uppercase tracking-[0.12em] text-hub-text-muted">Other active tasks</p>
-                  {secondaryNowSummaries.map((summary) => (
-                    <div key={summary.task_id} className="flex flex-wrap items-center gap-2 rounded-md border border-hub-border/60 px-2 py-1.5 font-mono text-[9px] text-hub-text-muted">
-                      <span className="text-hub-text">{summary.task_id}</span>
-                      <span className={clsx('rounded border px-1.5 py-0.5', afkTaskStatusTone(summary.status))}>
-                        {formatAfkTaskStatusLabel(summary.status)}
-                      </span>
-                      {summary.current_unit && <span>unit {summary.current_unit}</span>}
-                    </div>
-                  ))}
-                </div>
-              )}
+              ))}
             </div>
-          ) : (
-            <p className="mt-2 text-[10px] text-hub-text-muted">无活跃 AFK 任务 · 轮次 {afkStatus?.loopCount ?? 0}/{afkStatus?.maxLoops ?? 40}</p>
           )}
 
           {humanReviewSummaries.map((summary) => (
@@ -1366,44 +1123,23 @@ export function RrPage() {
           {afkInfo && (
             <p className="mt-1.5 text-[10px] text-hub-green">{afkInfo}</p>
           )}
-
-          {(historyAfkSummaries.length > 0 || afkReport.length > 0) && (
-            <div className="mt-3 border-t border-hub-border/60 pt-2">
-              <button
-                type="button"
-                onClick={() => setHistoryExpanded((current) => !current)}
-                className="flex w-full items-center gap-2 text-left text-[9px] font-semibold uppercase tracking-[0.14em] text-hub-text-muted hover:text-hub-text"
-              >
-                <span>{historyExpanded ? '▾' : '▸'}</span>
-                <span>HISTORY ({historyAfkSummaries.length + afkReport.length})</span>
-              </button>
-              {historyExpanded && (
-                <div className="mt-2 space-y-2">
-                  {historyAfkSummaries.map((summary) => (
-                    <div key={summary.task_id} className="rounded-md border border-hub-border/60 bg-hub-bg/40 px-2.5 py-2">
-                      <div className="flex flex-wrap items-center gap-2 font-mono text-[9px]">
-                        <span className="text-hub-text">{summary.task_id}</span>
-                        <span className={clsx('rounded border px-1.5 py-0.5', afkTaskStatusTone(summary.status))}>
-                          {formatAfkTaskStatusLabel(summary.status)}
-                        </span>
-                        {summary.current_unit && <span className="text-hub-text-muted">unit {summary.current_unit}</span>}
-                        <span className="text-hub-text-muted">{summary.updated_at}</span>
-                      </div>
-                    </div>
-                  ))}
-                  {afkReport.map((item) => (
-                    <div key={item.taskId} className="rounded-md border border-hub-border/60 bg-hub-bg/40 px-2.5 py-2">
-                      <div className="flex items-center gap-2 text-[9px]">
-                        <span className="font-mono text-hub-text">{item.taskId}</span>
-                        <span className="text-hub-text-muted">DECISION · {item.lineCount} lines</span>
-                      </div>
-                      <p className="mt-1 line-clamp-2 font-mono text-[9px] leading-4 text-hub-text-muted" title={item.excerpt}>
-                        {item.excerpt}
-                      </p>
-                    </div>
-                  ))}
-                </div>
-              )}
+          {afkStatus?.todo.pendingItems.length ? (
+            <p className="mt-1 truncate text-[9px] text-hub-text-muted" title={afkStatus.todo.pendingItems.join(' · ')}>
+              下一项 TODO：{afkStatus.todo.pendingItems[0]}
+            </p>
+          ) : null}
+          {afkReport.length > 0 && (
+            <div className="mt-2 rounded-lg border border-hub-border/80 bg-hub-bg/50 px-3 py-2">
+              <p className="text-[9px] font-semibold uppercase tracking-[0.12em] text-hub-text-muted">Decisions</p>
+              {afkReport.map((item) => (
+                <pre
+                  key={item.taskId}
+                  className="mt-1.5 max-h-20 overflow-hidden whitespace-pre-wrap font-mono text-[9px] leading-4 text-hub-text-muted"
+                  title={item.excerpt}
+                >
+                  {item.taskId}: {item.excerpt}
+                </pre>
+              ))}
             </div>
           )}
         </div>
@@ -1602,23 +1338,11 @@ export function RrPage() {
           <section>
             <h3 className="mb-2 text-[10px] font-semibold uppercase tracking-[0.18em] text-hub-text-muted">可调度会话</h3>
             <div className="space-y-2">
-              {sortedLiveSubagents.length > 0 && (
-                <p className="text-[9px] font-semibold uppercase tracking-[0.14em] text-hub-text-muted">
-                  Living ({sortedLiveSubagents.length})
-                </p>
-              )}
-              {sortedLiveSubagents.map((agent) => (
+              {subagents.map((agent) => (
                 <div key={agent.sessionId} className="rounded-lg border border-hub-border bg-hub-bg/50 p-3">
                   <div className="flex items-center gap-2">
-                    <span className={clsx(
-                      'h-1.5 w-1.5 shrink-0 rounded-full',
-                      agent.availability === 'busy' ? 'bg-hub-accent' : 'bg-hub-green',
-                    )} />
                     <strong className="min-w-0 flex-1 truncate text-[11px]">{agent.name}</strong>
-                    <span className={clsx(
-                      'text-[9px]',
-                      agent.availability === 'idle' ? 'text-hub-green' : agent.availability === 'busy' ? 'text-hub-accent' : 'text-hub-text-muted',
-                    )}>
+                    <span className={clsx('text-[9px]', agent.availability === 'idle' ? 'text-hub-green' : agent.availability === 'busy' ? 'text-hub-accent' : 'text-hub-text-muted')}>
                       {agent.availability}
                     </span>
                   </div>
@@ -1629,36 +1353,6 @@ export function RrPage() {
                   )}
                 </div>
               ))}
-              {sortedOfflineSubagents.length > 0 && (
-                <div className="border-t border-hub-border/60 pt-2">
-                  <button
-                    type="button"
-                    onClick={() => setOfflineDispatchSubagentsExpanded((current) => !current)}
-                    className="flex w-full items-center gap-2 px-1 py-1 text-left text-[9px] font-semibold uppercase tracking-[0.14em] text-hub-text-muted hover:text-hub-text"
-                  >
-                    <span>{offlineDispatchSubagentsExpanded ? '▾' : '▸'}</span>
-                    <span>Offline ({sortedOfflineSubagents.length})</span>
-                  </button>
-                  {offlineDispatchSubagentsExpanded && (
-                    <div className="mt-1 space-y-2 opacity-80">
-                      {sortedOfflineSubagents.map((agent) => (
-                        <div key={agent.sessionId} className="rounded-lg border border-hub-border bg-hub-bg/50 p-3">
-                          <div className="flex items-center gap-2">
-                            <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-hub-text-muted" />
-                            <strong className="min-w-0 flex-1 truncate text-[11px]">{agent.name}</strong>
-                            <span className="text-[9px] text-hub-text-muted">{agent.availability}</span>
-                          </div>
-                          {agent.activeTask?.progress && (
-                            <p className="mt-2 text-[9px] text-hub-text-muted">
-                              {agent.activeTask.progress.percent ?? '?'}% · {agent.activeTask.progress.text}
-                            </p>
-                          )}
-                        </div>
-                      ))}
-                    </div>
-                  )}
-                </div>
-              )}
               {subagents.length === 0 && (
                 <p className="text-[10px] leading-5 text-hub-text-muted">其他会话打开“子 Agent”开关后会出现在这里。</p>
               )}

@@ -1,9 +1,4 @@
-import type { RrMessage, RrSession, RrSessionStatus, RrSubagent } from '../types/rr'
-
-/** Brief grace window for completed agents before treating as offline (BinaryLoader-style). */
-export const RR_COMPLETED_GRACE_MS = 15_000
-
-export type RrAvailabilityLike = RrSessionStatus | RrSubagent['availability'] | 'completed'
+import type { RrMessage, RrSession, RrSessionStatus } from '../types/rr'
 
 export const DEFAULT_RR_AGENT_NAME = 'Rr Agent'
 export const DEFAULT_RR_AGENT_ROLE = 'general-purpose'
@@ -24,85 +19,6 @@ const tones: Record<RrSessionStatus, string> = {
 
 export function statusLabel(status: RrSessionStatus): string { return labels[status] }
 export function statusTone(status: RrSessionStatus): string { return tones[status] }
-
-/** True for idle/busy/working/waiting/online; false for offline; completed only within grace. */
-export function isLiveAvailability(
-  availability: string,
-  options?: { completedAt?: number; now?: number; graceMs?: number },
-): boolean {
-  if (availability === 'offline') return false
-  if (availability === 'completed') {
-    const { completedAt, now = Date.now(), graceMs = RR_COMPLETED_GRACE_MS } = options ?? {}
-    if (completedAt == null) return false
-    return now - completedAt <= graceMs
-  }
-  return true
-}
-
-export function isLiveSession(session: Pick<RrSession, 'status' | 'online'>, _now = Date.now()): boolean {
-  if (session.status === 'offline' || !session.online) return false
-  return isLiveAvailability(session.status)
-}
-
-export function partitionSessionsByLiveness(
-  sessions: RrSession[],
-  now = Date.now(),
-): { live: RrSession[]; offline: RrSession[] } {
-  const live: RrSession[] = []
-  const offline: RrSession[] = []
-  for (const session of sessions) {
-    if (isLiveSession(session, now)) live.push(session)
-    else offline.push(session)
-  }
-  return { live, offline }
-}
-
-export function isLiveSubagent(agent: Pick<RrSubagent, 'availability'>, now = Date.now()): boolean {
-  return isLiveAvailability(agent.availability, { now })
-}
-
-export function partitionSubagentsByLiveness(
-  subagents: RrSubagent[],
-  now = Date.now(),
-): { live: RrSubagent[]; offline: RrSubagent[] } {
-  const live: RrSubagent[] = []
-  const offline: RrSubagent[] = []
-  for (const agent of subagents) {
-    if (isLiveSubagent(agent, now)) live.push(agent)
-    else offline.push(agent)
-  }
-  return { live, offline }
-}
-
-/** Lower rank = higher urgency (working > waiting > inbox > online > offline). */
-export function sessionUrgencyRank(session: RrSession): number {
-  if (session.status === 'working') return 0
-  if (session.status === 'waiting') return 1
-  if (session.pendingMessages > 0) return 2
-  if (session.status === 'online') return 3
-  return 4
-}
-
-export function sortSessionsByUrgency(sessions: RrSession[]): RrSession[] {
-  return [...sessions].sort((a, b) => {
-    const diff = sessionUrgencyRank(a) - sessionUrgencyRank(b)
-    if (diff !== 0) return diff
-    return b.lastActiveAt - a.lastActiveAt || b.createdAt - a.createdAt
-  })
-}
-
-export function sortSubagentsByUrgency(subagents: RrSubagent[]): RrSubagent[] {
-  const rank = (agent: RrSubagent): number => {
-    if (agent.availability === 'busy') return 0
-    if (agent.availability === 'idle') return 1
-    return 2
-  }
-  return [...subagents].sort((a, b) => {
-    const diff = rank(a) - rank(b)
-    if (diff !== 0) return diff
-    return b.lastActiveAt - a.lastActiveAt
-  })
-}
 
 export function shouldNotifyRr(message: Pick<RrMessage, 'msgId' | 'role'>, seen: Set<string>): boolean {
   return message.role === 'assistant' && !seen.has(message.msgId)

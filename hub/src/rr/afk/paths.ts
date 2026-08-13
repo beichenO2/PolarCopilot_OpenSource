@@ -50,11 +50,6 @@ export function lockPath(taskId: string): string {
   return join(taskDir(taskId), 'lock');
 }
 
-/** Global index RMW lock — serializes active_tasks / done_tasks updates. */
-export function indexLockPath(): string {
-  return join(tasksRoot(), '.index.lock');
-}
-
 function readIndexSafe(): RrAfkTaskIndex | null {
   const path = indexPath();
   if (!existsSync(path)) return null;

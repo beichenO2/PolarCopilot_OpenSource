@@ -17,7 +17,6 @@ import { basename, join } from 'node:path';
 import {
   afkRoot,
   eventsPath,
-  indexLockPath,
   indexPath,
   legacyAfkRoot,
   lockPath,
@@ -37,60 +36,9 @@ import type {
 } from './types.js';
 
 const DEFAULT_MAX_LOOPS = 40;
-const INDEX_LOCK_TIMEOUT_MS = 5_000;
-const INDEX_LOCK_RETRY_MS = 5;
-
-let indexLockDepth = 0;
-let indexLockFd: number | null = null;
 
 function nowIso(): string {
   return new Date().toISOString();
-}
-
-function acquireIndexLock(): void {
-  if (indexLockDepth > 0) {
-    indexLockDepth += 1;
-    return;
-  }
-  ensureAfkRoot();
-  mkdirSync(tasksRoot(), { recursive: true, mode: 0o700 });
-  const path = indexLockPath();
-  const deadline = Date.now() + INDEX_LOCK_TIMEOUT_MS;
-  while (Date.now() < deadline) {
-    try {
-      const fd = openSync(path, 'wx', 0o600);
-      writeFileSync(fd, `${process.pid}\n`, 'utf8');
-      indexLockFd = fd;
-      indexLockDepth = 1;
-      return;
-    } catch {
-      const waitUntil = Date.now() + INDEX_LOCK_RETRY_MS;
-      while (Date.now() < waitUntil) {
-        // brief spin while another writer holds .index.lock
-      }
-    }
-  }
-  throw new Error('index_lock_timeout');
-}
-
-function releaseIndexLock(): void {
-  if (indexLockDepth <= 0) return;
-  indexLockDepth -= 1;
-  if (indexLockDepth > 0) return;
-  if (indexLockFd !== null) {
-    closeSync(indexLockFd);
-    indexLockFd = null;
-  }
-  rmSync(indexLockPath(), { force: true });
-}
-
-export function withIndexLock<T>(fn: () => T): T {
-  acquireIndexLock();
-  try {
-    return fn();
-  } finally {
-    releaseIndexLock();
-  }
 }
 
 function readJson<T>(path: string): T {
@@ -109,16 +57,15 @@ function defaultPlan(taskId: string): string {
 }
 
 function defaultCriteria(): string {
-  // vNext: do NOT seed fake `npm test` / U1 — agent must freeze real criteria before DONE.
-  return '# Acceptance Criteria\n\n<!-- afk:criteria-unfrozen -->\n<!-- Freeze real, project-specific criteria before VERIFYING/DONE. -->\n';
+  return '# Acceptance Criteria\n\n- [ ] `npm test` passes\n';
 }
 
 function defaultTasks(): string {
-  return '# Task Units\n\n<!-- Add atomic units after plan freeze; do not invent placeholder U1. -->\n';
+  return '# Task Units\n\n## U1\n\n- Scope: first change\n- Verify: npm test\n';
 }
 
 function defaultTodo(): string {
-  return '# TODO\n\n<!-- Open items use `- [ ]`; empty checklist means no open work. -->\n';
+  return '# TODO\n\n- [ ] U1 — first atomic unit\n';
 }
 
 function defaultDecisions(): string {
@@ -131,81 +78,32 @@ export function ensureAfkRoot(): string {
   return root;
 }
 
-function filterTaskIds(ids: unknown): string[] {
-  if (!Array.isArray(ids)) return [];
-  return ids.filter((taskId): taskId is string => typeof taskId === 'string' && TASK_ID_PATTERN.test(taskId));
-}
-
-function readIndexUnlocked(): RrAfkTaskIndex {
+export function readIndex(): RrAfkTaskIndex {
   ensureAfkRoot();
   const path = indexPath();
   if (!existsSync(path)) {
-    return { active_tasks: [], done_tasks: [], updated_at: nowIso() };
+    return { active_tasks: [], updated_at: nowIso() };
   }
   try {
     const raw = readJson<Partial<RrAfkTaskIndex>>(path);
     return {
-      active_tasks: filterTaskIds(raw.active_tasks),
-      done_tasks: filterTaskIds(raw.done_tasks),
+      active_tasks: Array.isArray(raw.active_tasks)
+        ? raw.active_tasks.filter((taskId): taskId is string => typeof taskId === 'string' && TASK_ID_PATTERN.test(taskId))
+        : [],
       updated_at: typeof raw.updated_at === 'string' ? raw.updated_at : nowIso(),
     };
   } catch {
-    return { active_tasks: [], done_tasks: [], updated_at: nowIso() };
+    return { active_tasks: [], updated_at: nowIso() };
   }
-}
-
-function writeIndexUnlocked(index: RrAfkTaskIndex): RrAfkTaskIndex {
-  ensureAfkRoot();
-  const path = indexPath();
-  let preservedDone: string[] = [];
-  if (index.done_tasks === undefined && existsSync(path)) {
-    try {
-      preservedDone = filterTaskIds(readJson<Partial<RrAfkTaskIndex>>(path).done_tasks);
-    } catch {
-      preservedDone = [];
-    }
-  }
-  const next: RrAfkTaskIndex = {
-    active_tasks: [...new Set(filterTaskIds(index.active_tasks))],
-    done_tasks: [...new Set(filterTaskIds(index.done_tasks ?? preservedDone))],
-    updated_at: index.updated_at || nowIso(),
-  };
-  atomicJson(path, next);
-  return next;
-}
-
-export function readIndex(): RrAfkTaskIndex {
-  return withIndexLock(readIndexUnlocked);
 }
 
 export function writeIndex(index: RrAfkTaskIndex): RrAfkTaskIndex {
-  return withIndexLock(() => writeIndexUnlocked(index));
-}
-
-function appendTaskDone(taskId: string): RrAfkTaskIndex {
-  return withIndexLock(() => {
-    const index = readIndexUnlocked();
-    const active_tasks = index.active_tasks.filter((id) => id !== taskId);
-    const done_tasks = [...new Set([...(index.done_tasks ?? []), taskId])];
-    return writeIndexUnlocked({ active_tasks, done_tasks, updated_at: nowIso() });
-  });
-}
-
-/**
- * Mark task DONE in state.json and move taskId from active_tasks → done_tasks.
- * Idempotent index repair: if already DONE, still ensure index membership is correct
- * (fixes legacy early-return that left DONE ids in active_tasks).
- * Callers that expose DONE to users must go through completion gate first (doneAfk).
- */
-export function markTaskDone(taskId: string): RrAfkState | null {
-  const state = readState(taskId);
-  if (!state) return null;
-  if (state.status === 'DONE') {
-    appendTaskDone(taskId);
-    return readState(taskId);
-  }
-  const timestamp = nowIso();
-  const next = writeState(taskId, { ...state, status: 'DONE', updated_at: timestamp });
+  ensureAfkRoot();
+  const next: RrAfkTaskIndex = {
+    active_tasks: [...new Set(index.active_tasks)],
+    updated_at: index.updated_at || nowIso(),
+  };
+  atomicJson(indexPath(), next);
   return next;
 }
 
@@ -217,7 +115,7 @@ function summaryFromState(state: RrAfkState): RrAfkSummary {
     current_unit: state.current_unit,
     plan_revision: state.plan_revision,
     loop: state.loop,
-    allowlist: Array.isArray(state.allowlist) ? [...state.allowlist] : [],
+    allowlist: [...state.allowlist],
     permission_request: state.permission_request,
     last_command: state.last_command,
     last_verification: state.last_verification,
@@ -245,14 +143,9 @@ export function readState(taskId: string): RrAfkState | null {
 export function writeState(taskId: string, state: RrAfkState): RrAfkState {
   ensureAfkRoot();
   mkdirSync(taskDir(taskId), { recursive: true, mode: 0o700 });
-  const prev = readState(taskId);
   const next = { ...state, task_id: taskId, updated_at: state.updated_at || nowIso() };
   atomicJson(statePath(taskId), next);
   writeSummary(taskId, summaryFromState(next));
-  if (next.status === 'DONE' && prev?.status !== 'DONE') {
-    appendTaskDone(taskId);
-    appendEvent(taskId, { kind: 'task_done', detail: { previousStatus: prev?.status ?? null } });
-  }
   return next;
 }
 
@@ -263,12 +156,7 @@ export function readSummary(taskId: string): RrAfkSummary | null {
     return state ? summaryFromState(state) : null;
   }
   try {
-    const raw = readJson<RrAfkSummary>(path);
-    if (!raw.updated_at) {
-      const state = readState(taskId);
-      raw.updated_at = state?.updated_at ?? nowIso();
-    }
-    return raw;
+    return readJson<RrAfkSummary>(path);
   } catch {
     return null;
   }
@@ -321,53 +209,16 @@ export function listTaskSummaries(): RrAfkSummary[] {
     const summary = readSummary(taskId);
     if (summary) summaries.push(summary);
   }
-  summaries.sort((a, b) => (b.updated_at ?? '').localeCompare(a.updated_at ?? ''));
+  summaries.sort((a, b) => b.updated_at.localeCompare(a.updated_at));
   return summaries;
 }
 
 export function setTaskActive(taskId: string, active: boolean): RrAfkTaskIndex {
-  return withIndexLock(() => {
-    const index = readIndexUnlocked();
-    const set = new Set(index.active_tasks);
-    if (active) set.add(taskId);
-    else set.delete(taskId);
-    return writeIndexUnlocked({
-      active_tasks: [...set],
-      done_tasks: index.done_tasks,
-      updated_at: nowIso(),
-    });
-  });
-}
-
-export type ActivateWithAdmissionResult =
-  | { ok: true; index: RrAfkTaskIndex }
-  | { ok: false; reason: 'afk_budget_capacity' };
-
-/** Check admission cap and activate task atomically under index lock. */
-export function activateTaskWithAdmissionCap(
-  taskId: string,
-  cap: number,
-  force?: boolean,
-): ActivateWithAdmissionResult {
-  return withIndexLock(() => {
-    const index = readIndexUnlocked();
-    if (index.active_tasks.includes(taskId)) {
-      return { ok: true, index };
-    }
-    if (!force && index.active_tasks.length >= cap) {
-      return { ok: false, reason: 'afk_budget_capacity' };
-    }
-    const set = new Set(index.active_tasks);
-    set.add(taskId);
-    return {
-      ok: true,
-      index: writeIndexUnlocked({
-        active_tasks: [...set],
-        done_tasks: index.done_tasks,
-        updated_at: nowIso(),
-      }),
-    };
-  });
+  const index = readIndex();
+  const set = new Set(index.active_tasks);
+  if (active) set.add(taskId);
+  else set.delete(taskId);
+  return writeIndex({ active_tasks: [...set], updated_at: nowIso() });
 }
 
 function patchTaskStatus(taskId: string, status: RrAfkState['status']): RrAfkState | null {
@@ -377,46 +228,28 @@ function patchTaskStatus(taskId: string, status: RrAfkState['status']): RrAfkSta
 }
 
 export function pauseTask(taskId: string): RrAfkState | null {
-  return withIndexLock(() => {
-    const index = readIndexUnlocked();
-    const active_tasks = index.active_tasks.filter((id) => id !== taskId);
-    writeIndexUnlocked({
-      active_tasks,
-      done_tasks: index.done_tasks,
-      updated_at: nowIso(),
-    });
-    return patchTaskStatus(taskId, 'PAUSED');
-  });
+  setTaskActive(taskId, false);
+  return patchTaskStatus(taskId, 'PAUSED');
 }
 
 export function pauseAll(): RrAfkState[] {
-  return withIndexLock(() => {
-    const index = readIndexUnlocked();
-    const active = [...index.active_tasks];
-    const paused: RrAfkState[] = [];
-    for (const taskId of active) {
-      const state = patchTaskStatus(taskId, 'PAUSED');
-      if (state) paused.push(state);
-    }
-    writeIndexUnlocked({ active_tasks: [], done_tasks: index.done_tasks, updated_at: nowIso() });
-    return paused;
-  });
+  const active = resolveActiveTasks();
+  const paused: RrAfkState[] = [];
+  for (const taskId of active) {
+    const state = pauseTask(taskId);
+    if (state) paused.push(state);
+  }
+  writeIndex({ active_tasks: [], updated_at: nowIso() });
+  return paused;
 }
 
-export function resumeTask(
-  taskId: string,
-  options?: { admissionCap?: number; force?: boolean },
-): RrAfkState | null {
+export function resumeTask(taskId: string): RrAfkState | null {
   const state = readState(taskId);
   if (!state) return null;
-  if (options?.admissionCap !== undefined) {
-    const admission = activateTaskWithAdmissionCap(taskId, options.admissionCap, options.force);
-    if (!admission.ok) throw new Error(admission.reason);
-  } else {
-    setTaskActive(taskId, true);
-  }
   const nextStatus = state.status === 'PAUSED' ? 'READY' : state.status;
-  return writeState(taskId, { ...state, status: nextStatus, updated_at: nowIso() });
+  const next = writeState(taskId, { ...state, status: nextStatus, updated_at: nowIso() });
+  setTaskActive(taskId, true);
+  return next;
 }
 
 function newRootIsEmpty(): boolean {
@@ -523,8 +356,7 @@ export function migrateLegacyFlagsIfNeeded(): { migrated: boolean; taskId: strin
   appendEvent(taskId, { at: timestamp, kind: 'legacy_migrated', detail: { legacyRoot, status, maxLoops } });
 
   const activeTasks = hasActive && !hasPause && !hasDone ? [taskId] : [];
-  const doneTasks = hasDone ? [taskId] : [];
-  writeIndex({ active_tasks: activeTasks, done_tasks: doneTasks, updated_at: timestamp });
+  writeIndex({ active_tasks: activeTasks, updated_at: timestamp });
 
   return { migrated: true, taskId };
 }
@@ -582,16 +414,9 @@ export function initTaskArtifacts(input: InitTaskArtifactsInput): {
     detail: { projectRoot: input.projectRoot, mode: input.mode ?? null },
   });
 
-  let index: RrAfkTaskIndex;
-  if (input.activate === false) {
-    index = readIndex();
-  } else if (input.admissionCap !== undefined) {
-    const admission = activateTaskWithAdmissionCap(taskId, input.admissionCap, input.admissionForce);
-    if (!admission.ok) throw new Error(admission.reason);
-    index = admission.index;
-  } else {
-    index = setTaskActive(taskId, true);
-  }
+  const index = input.activate === false
+    ? readIndex()
+    : setTaskActive(taskId, true);
 
   const summary = readSummary(taskId)!;
   return { taskId, taskDir: dir, state, summary, index };

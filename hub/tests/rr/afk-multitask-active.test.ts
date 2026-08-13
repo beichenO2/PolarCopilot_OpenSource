@@ -39,26 +39,15 @@ describe('rr afk multi-active', () => {
   function useTempAfkRoot(projectRoot: string): { afkRoot: string; legacyAfkRoot: string } {
     const afkRoot = mkdtempSync(join(tmpdir(), 'rr-afk-multi-ssot-'));
     const legacyAfkRoot = join(projectRoot, 'legacy-afk');
-    const vnextDb = join(afkRoot, 'vnext-afk.db');
     roots.push(projectRoot, afkRoot);
     process.env.RR_AFK_ROOT = afkRoot;
     process.env.PC_PROJECT_DIR = projectRoot;
-    process.env.POLAR_AFK_DB = vnextDb;
     writeFileSync(join(projectRoot, '.rr-orchestrator.json'), JSON.stringify({
       projectRoot,
       afkRoot: legacyAfkRoot,
       statePath: join(projectRoot, 'state.json'),
     }), 'utf8');
     return { afkRoot, legacyAfkRoot };
-  }
-
-  function freezeDoneReady(taskId: string, afkRoot: string): void {
-    writeFileSync(
-      join(afkRoot, 'tasks', taskId, 'CRITERIA.md'),
-      '# Acceptance Criteria\n\n<!-- afk:criteria-frozen -->\n- integration smoke passes\n',
-      'utf8',
-    );
-    writeFileSync(join(afkRoot, 'tasks', taskId, 'TODO.md'), '# TODO\n\n- [x] done\n', 'utf8');
   }
 
   it('writeIndex preserves done_tasks when callers omit the field', () => {
@@ -449,29 +438,18 @@ describe('rr afk multi-active', () => {
 
   it('doneAfk on one task leaves sibling active and frees admission slot', () => {
     const projectRoot = mkdtempSync(join(tmpdir(), 'rr-afk-done-sibling-'));
-    const { afkRoot } = useTempAfkRoot(projectRoot);
+    useTempAfkRoot(projectRoot);
 
     initTaskArtifacts({ taskId: 'done-a', projectRoot, masterSessionId: 'sess-a', activate: true });
     initTaskArtifacts({ taskId: 'done-b', projectRoot, masterSessionId: 'sess-b', activate: true });
     expect(readIndex().active_tasks.sort()).toEqual(['done-a', 'done-b']);
 
-    freezeDoneReady('done-a', afkRoot);
-    const result = doneAfk('done-a', {
-      evidence: { command: 'npm test -- smoke', exitCode: 0, salient: 'ok' },
-    });
+    const result = doneAfk('done-a');
     expect(result.done.task_id).toBe('done-a');
     expect(result.done.status).toBe('DONE');
     expect(result.index.active_tasks).toEqual(['done-b']);
     expect(result.index.done_tasks).toContain('done-a');
     expect(readSummary('done-b')?.status).not.toBe('DONE');
-  });
-
-  it('doneAfk rejects when criteria unfrozen (no fake DONE)', () => {
-    const projectRoot = mkdtempSync(join(tmpdir(), 'rr-afk-done-gate-'));
-    useTempAfkRoot(projectRoot);
-    initTaskArtifacts({ taskId: 'ungated', projectRoot, masterSessionId: 'sess-u', activate: true });
-    expect(() => doneAfk('ungated')).toThrow(/afk_completion_gate_failed/);
-    expect(readIndex().active_tasks).toContain('ungated');
   });
 
   it('haltAfkOrchestrator pauses all tasks and clears active_tasks', async () => {

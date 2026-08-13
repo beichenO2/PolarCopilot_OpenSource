@@ -14,8 +14,6 @@ import {
   resolveActiveTasks,
   setTaskActive,
   taskDir,
-  withIndexLock,
-  writeIndex,
 } from '../../src/rr/afk/index.js';
 
 describe('rr afk store', () => {
@@ -167,17 +165,5 @@ describe('rr afk store', () => {
     expect(afkRoot()).toBe(newRoot);
     expect(legacyAfkRoot()).toBe(legacyRoot);
     expect(indexPath()).toBe(join(newRoot, 'tasks', 'index.json'));
-  });
-
-  it('serializes index RMW via withIndexLock', () => {
-    useTempRoots();
-    const seen: string[] = [];
-    withIndexLock(() => {
-      seen.push('a');
-      writeIndex({ active_tasks: ['locked-task'], updated_at: new Date().toISOString() });
-      seen.push('b');
-    });
-    expect(seen).toEqual(['a', 'b']);
-    expect(readIndex().active_tasks).toEqual(['locked-task']);
   });
 });

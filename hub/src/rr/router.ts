@@ -3,7 +3,6 @@ import type pino from 'pino';
 import {
   armAfk,
   configureMasterSession,
-  doneAfk,
   grantTemporaryPaths,
   haltAfkOrchestrator,
   oneClickAfk,
@@ -21,11 +20,6 @@ import {
   AFK_MODE_GO_FORBIDS_LIST_SUBAGENTS,
   assertCanDispatchSubagent,
 } from './afk/dispatch-guard.js';
-import { AfkCompletionGateError } from './afk/vnext/bridge.js';
-import { openAfkDb } from './afk/vnext/db.js';
-import { listActiveTasks } from './afk/vnext/store.js';
-import { createWebTask, resolveExecConcurrency } from './afk/vnext/cli-adapter.js';
-import { evaluateCompletion } from './afk/vnext/completion-gate.js';
 import { defaultRrWorkspace } from './cursor-spawn.js';
 import { globalConfigPath, loadConfig, patchGlobalConfig, readAllowNewSubagents } from './orchestrator/config.js';
 import { readOrchestratorHealth } from './orchestrator/health.js';
@@ -40,8 +34,7 @@ export interface RrRouterDeps {
   orchestratorConfigPath?: string;
 }
 
-export function errorStatus(error: unknown): number {
-  if (error instanceof AfkCompletionGateError) return 409;
+function errorStatus(error: unknown): number {
   const message = error instanceof Error ? error.message : String(error);
   if (message === 'session_not_found') return 404;
   if (message === 'session_deleted') return 410;
@@ -49,9 +42,8 @@ export function errorStatus(error: unknown): number {
   if (message === 'cursor_cli_not_found' || message === 'cursor_spawn_failed') return 503;
   if (message.startsWith('polarprocess_')) return 503;
   if (message === 'batch_not_found') return 404;
-  if (message === 'afk_already_active' || message === 'no_master_session' || message === 'session_bound_to_other_task' || message === 'afk_budget_capacity') return 409;
+  if (message === 'afk_already_active' || message === 'no_master_session') return 409;
   if (message === 'afk_task_not_found') return 404;
-  if (message.startsWith('afk_completion_gate_failed')) return 409;
   if (message === 'permission_not_requested') return 409;
   if (message === 'invalid_confirmation') return 400;
   if (message === AFK_MODE_GO_FORBIDS_DISPATCH || message === AFK_MODE_GO_FORBIDS_LIST_SUBAGENTS) return 403;
@@ -114,16 +106,6 @@ export function createRrRouter({
   const handleError = (res: Response, error: unknown) => {
     const message = error instanceof Error ? error.message : String(error);
     logger?.error({ err: message }, 'rr route error');
-    if (error instanceof AfkCompletionGateError) {
-      res.status(409).json({
-        ok: false,
-        error: 'afk_completion_gate_failed',
-        gaps: error.report.gaps,
-        required_total: error.report.required_total,
-        required_pass: error.report.required_pass,
-      });
-      return;
-    }
     res.status(errorStatus(error)).json({ ok: false, error: message });
   };
 
@@ -432,89 +414,13 @@ export function createRrRouter({
     } catch (error) { handleError(res, error); }
   });
 
-  router.post('/ui/rr/afk/resume', async (req, res) => {
+  router.post('/ui/rr/afk/resume', (req, res) => {
     try {
-      const body = req.body as { taskId?: string; force?: boolean };
-      const result = await resumeAfk(body.taskId, { force: body.force });
+      const body = req.body as { taskId?: string };
+      const result = resumeAfk(body.taskId);
       notify('rr_afk_updated', { action: 'resume', ...result });
       res.json({ ok: true, ...result });
     } catch (error) { handleError(res, error); }
-  });
-
-  router.post('/ui/rr/afk/done', (req, res) => {
-    try {
-      const body = req.body as { taskId?: string };
-      if (!body.taskId || typeof body.taskId !== 'string') throw new Error('invalid_task_id');
-      const result = doneAfk(body.taskId);
-      notify('rr_afk_updated', { action: 'done', ...result });
-      res.json({ ok: true, ...result });
-    } catch (error) { handleError(res, error); }
-  });
-
-  /** AFK vNext control-plane (SQLite) — UI should prefer these over sessionId-centric views. */
-  router.get('/ui/rr/afk/vnext/tasks', (_req, res) => {
-    try {
-      const db = openAfkDb();
-      try {
-        const active = listActiveTasks(db);
-        const tasks = db
-          .prepare(
-            'SELECT task_id, goal, project_root, surface, status, mode, updated_at FROM tasks ORDER BY updated_at DESC LIMIT 100',
-          )
-          .all();
-        res.json({
-          ok: true,
-          active,
-          tasks,
-          exec_concurrency_hint: resolveExecConcurrency(null),
-          budget_note: 'budget_unavailable→exec_concurrency=1',
-        });
-      } finally {
-        db.close();
-      }
-    } catch (error) {
-      handleError(res, error);
-    }
-  });
-
-  router.post('/ui/rr/afk/vnext/tasks', (req, res) => {
-    try {
-      const body = req.body as { goal?: string; projectRoot?: string; mode?: 'start' | 'solo' };
-      if (!body.goal || !body.projectRoot) throw new Error('invalid_task_create');
-      const db = openAfkDb();
-      try {
-        const task = createWebTask(db, {
-          goal: body.goal,
-          projectRoot: body.projectRoot,
-          mode: body.mode ?? 'solo',
-        });
-        notify('rr_afk_updated', { action: 'vnext_create', task });
-        res.status(201).json({ ok: true, task });
-      } finally {
-        db.close();
-      }
-    } catch (error) {
-      handleError(res, error);
-    }
-  });
-
-  router.get('/ui/rr/afk/vnext/tasks/:taskId/completion', (req, res) => {
-    try {
-      const db = openAfkDb();
-      try {
-        const report = evaluateCompletion(db, req.params.taskId);
-        res.json({
-          gate_ok: report.ok,
-          gaps: report.gaps,
-          required_total: report.required_total,
-          required_pass: report.required_pass,
-        });
-      } finally {
-        db.close();
-      }
-    } catch (error) {
-      handleError(res, error);
-    }
   });
 
   router.post('/ui/rr/afk/:taskId/grant-temporary-paths', (req, res) => {
@@ -530,10 +436,10 @@ export function createRrRouter({
     } catch (error) { handleError(res, error); }
   });
 
-  router.post('/ui/rr/afk/tick', async (req, res) => {
+  router.post('/ui/rr/afk/tick', (req, res) => {
     try {
       const body = req.body as { taskId?: string; reason?: string };
-      const result = await tickAfk(store, body.taskId, body.reason);
+      const result = tickAfk(store, body.taskId, body.reason);
       notify('rr_afk_updated', { action: 'tick', ...result });
       res.json({ ok: true, ...result });
     } catch (error) { handleError(res, error); }
@@ -556,7 +462,7 @@ export function createRrRouter({
     } catch (error) { handleError(res, error); }
   });
 
-  router.post('/ui/rr/afk/arm', async (req, res) => {
+  router.post('/ui/rr/afk/arm', (req, res) => {
     try {
       const body = req.body as {
         taskDir?: string
@@ -566,7 +472,7 @@ export function createRrRouter({
         projectRoot?: string
         masterSessionId?: string
       };
-      const result = await armAfk(body);
+      const result = armAfk(body);
       if (body.masterSessionId) configureMasterSession(body.masterSessionId, body.projectRoot);
       res.status(201).json({ ok: true, ...result });
     } catch (error) { handleError(res, error); }

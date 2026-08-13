@@ -7,6 +7,8 @@ import { EcoTree } from '../components/EcoTree'
 import { TopicsPanel } from '../components/TopicsPanel'
 import { api } from '../lib/api'
 import { renderMarkdown } from '../lib/markdown'
+import { buildCenterThread, isAtLiveEdge, pendingScrollTargetId, shouldRenderAgentBubble } from '../lib/prompt-thread'
+import type { ThreadMessage } from '../lib/prompt-thread'
 import { playNotifySound, unlockAudio, isAudioLocked, requestNotificationPermission, showDesktopNotification } from '../lib/notify'
 import { useUiSse } from '../lib/useUiSse'
 import { useResizableWidth } from '../lib/useResizableWidth'
@@ -62,7 +64,6 @@ const draftInputs = new Map<string, string>()
 const draftHeights = new Map<string, number>()
 export function PromptsPage() {
   const { agents, pendingPrompts, historyPrompts, selectedAgentId, fetchAgents, fetchPrompts, fetchHistory, selectAgent, answerPrompt } = useHubStore()
-  const [showHistory, setShowHistory] = useState(true)
   const [showDeadAgents, setShowDeadAgents] = useState(false)
   const [audioLocked, setAudioLocked] = useState(true)
   const [showAgentPanel, setShowAgentPanel] = useState(false)
@@ -75,11 +76,42 @@ export function PromptsPage() {
   const mainScrollRef = useRef<HTMLDivElement>(null)
   const pendingSectionRef = useRef<HTMLDivElement>(null)
 
-  const { saveAnchor } = useScrollAnchor(pendingSectionRef, [pendingPrompts, historyPrompts])
+  const { saveAnchor, userInteractingRef } = useScrollAnchor(pendingSectionRef, [pendingPrompts, historyPrompts, selectedAgentId])
+  const threadEndRef = useRef<HTMLDivElement>(null)
+  const prevPendingIdsRef = useRef<Set<string>>(new Set())
+  const didInitialScrollRef = useRef(false)
+  const hasUserScrolledRef = useRef(false)
 
-  // 左右侧栏拖拽调宽（localStorage 持久化，双击分隔条重置）
+  useEffect(() => {
+    const markUserScrolled = () => {
+      hasUserScrolledRef.current = true
+    }
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (['ArrowUp', 'ArrowDown', 'PageUp', 'PageDown', 'Home', 'End', ' '].includes(e.key)) {
+        markUserScrolled()
+      }
+    }
+    const opts: AddEventListenerOptions = { passive: true }
+    window.addEventListener('wheel', markUserScrolled, opts)
+    window.addEventListener('touchmove', markUserScrolled, opts)
+    window.addEventListener('keydown', onKeyDown)
+    return () => {
+      window.removeEventListener('wheel', markUserScrolled, opts)
+      window.removeEventListener('touchmove', markUserScrolled, opts)
+      window.removeEventListener('keydown', onKeyDown)
+    }
+  }, [])
+
+  const readScrollBottomGapPx = useCallback((): number => {
+    const container = mainScrollRef.current
+    if (container && container.scrollHeight > container.clientHeight) {
+      return container.scrollHeight - container.scrollTop - container.clientHeight
+    }
+    return document.documentElement.scrollHeight - window.scrollY - window.innerHeight
+  }, [])
+
+  // 左侧栏拖拽调宽（localStorage 持久化，双击分隔条重置）
   const leftPane = useResizableWidth('pc-prompts-left-w', 220, 160, 520)
-  const rightPane = useResizableWidth('pc-prompts-right-w', 320, 220, 680, true)
 
   useEffect(() => {
     requestNotificationPermission()
@@ -107,8 +139,8 @@ export function PromptsPage() {
     saveAnchor()
     fetchAgents().catch(() => {})
     fetchPrompts().catch(() => {})
-    if (showHistory) fetchHistory().catch(() => {})
-  }, [fetchAgents, fetchPrompts, fetchHistory, showHistory, saveAnchor])
+    fetchHistory().catch(() => {})
+  }, [fetchAgents, fetchPrompts, fetchHistory, saveAnchor])
 
   useUiSse(useCallback(() => { refresh() }, [refresh]))
 
@@ -137,23 +169,47 @@ export function PromptsPage() {
     }
   }, [agents])
 
-  const filteredPrompts = useMemo(() => {
-    const list = selectedAgentId
-      ? pendingPrompts.filter((p) => p.agent_id === selectedAgentId)
-      : pendingPrompts
-    return [...list].sort((a, b) =>
-      new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
-    )
-  }, [selectedAgentId, pendingPrompts])
+  const centerThread = useMemo(
+    () => buildCenterThread(selectedAgentId, pendingPrompts, historyPrompts),
+    [selectedAgentId, pendingPrompts, historyPrompts],
+  )
 
-  const filteredHistory = useMemo(() => {
-    const list = selectedAgentId
-      ? historyPrompts.filter((p) => p.agent_id === selectedAgentId)
-      : historyPrompts
-    return [...list].sort((a, b) =>
-      new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
-    )
-  }, [selectedAgentId, historyPrompts])
+  const promptById = useMemo(() => {
+    const map = new Map<string, Prompt>()
+    for (const p of historyPrompts) map.set(p.id, p)
+    for (const p of pendingPrompts) map.set(p.id, p)
+    return map
+  }, [pendingPrompts, historyPrompts])
+
+  const pendingCount = useMemo(
+    () => centerThread.messages.filter((m) => m.role === 'pending').length,
+    [centerThread],
+  )
+  useLayoutEffect(() => {
+    if (!mainScrollRef.current) return
+
+    const currentPendingIds = new Set(pendingPrompts.map((p) => p.id))
+    const prevPendingIds = prevPendingIdsRef.current
+    const hasNewPending = [...currentPendingIds].some((id) => !prevPendingIds.has(id))
+    const atLiveEdge = isAtLiveEdge(readScrollBottomGapPx())
+    const shouldScroll =
+      (!hasUserScrolledRef.current && !didInitialScrollRef.current) ||
+      (hasNewPending && atLiveEdge)
+
+    if (shouldScroll) {
+      const targetId = pendingScrollTargetId(centerThread.messages)
+      const pendingEl = targetId ? document.getElementById(`prompt-${targetId}`) : null
+      const behavior = didInitialScrollRef.current ? 'smooth' : 'auto'
+      if (pendingEl) {
+        pendingEl.scrollIntoView({ block: 'end', behavior })
+      } else {
+        threadEndRef.current?.scrollIntoView({ block: 'end', behavior })
+      }
+      didInitialScrollRef.current = true
+    }
+
+    prevPendingIdsRef.current = currentPendingIds
+  }, [centerThread, pendingPrompts, readScrollBottomGapPx])
 
   const handlePurgeDead = async () => {
     await api.agents.purgeDead()
@@ -296,7 +352,7 @@ export function PromptsPage() {
 
       <ResizeHandle onMouseDown={leftPane.onMouseDown} onDoubleClick={leftPane.reset} dragging={leftPane.dragging} />
 
-      {/* Center: Pending Prompts */}
+      {/* Center: Thread */}
       <main ref={mainScrollRef} className="flex-1 min-w-0 py-4 px-4">
         {audioLocked && (
           <div
@@ -310,71 +366,102 @@ export function PromptsPage() {
         <section ref={pendingSectionRef}>
           <div className="flex items-center gap-3 mb-3 pb-2 border-b border-hub-border">
             <h2 className="text-base font-semibold flex items-center gap-2">
-              Pending
-              <span className="text-[0.7rem] px-2 py-0.5 rounded-lg bg-hub-accent-bg text-white">
-                {filteredPrompts.length}
-              </span>
+              Thread
+              {pendingCount > 0 && (
+                <span className="text-[0.7rem] px-2 py-0.5 rounded-lg bg-hub-accent-bg text-white">
+                  {pendingCount} pending
+                </span>
+              )}
             </h2>
           </div>
 
           <div className="space-y-4">
-            {filteredPrompts.map((p) => (
-              <div key={p.id} id={`prompt-${p.id}`}>
-                <PromptCard
-                  prompt={p}
-                  onAnswer={answerPrompt}
-                  onDismiss={handleDismissPrompt}
-                  savedDraft={draftInputs.get(p.id) ?? ''}
-                  savedHeight={draftHeights.get(p.id)}
-                  onDraftChange={(text) => { if (text) draftInputs.set(p.id, text); else draftInputs.delete(p.id) }}
-                  onHeightChange={(h) => { if (h) draftHeights.set(p.id, h); else draftHeights.delete(p.id) }}
-                  onAnnotationsConsumed={handleAnnotationsConsumed}
-                />
-              </div>
-            ))}
-            {filteredPrompts.length === 0 && (
+            {centerThread.messages.map((msg) => {
+              if (msg.role === 'pending') {
+                const p = promptById.get(msg.prompt_id)
+                if (!p) return null
+                return (
+                  <div key={msg.id} id={`prompt-${p.id}`}>
+                    <PromptCard
+                      prompt={p}
+                      onAnswer={answerPrompt}
+                      onDismiss={handleDismissPrompt}
+                      savedDraft={draftInputs.get(p.id) ?? ''}
+                      savedHeight={draftHeights.get(p.id)}
+                      onDraftChange={(text) => { if (text) draftInputs.set(p.id, text); else draftInputs.delete(p.id) }}
+                      onHeightChange={(h) => { if (h) draftHeights.set(p.id, h); else draftHeights.delete(p.id) }}
+                      onAnnotationsConsumed={handleAnnotationsConsumed}
+                    />
+                  </div>
+                )
+              }
+              if (msg.role === 'agent') {
+                if (!shouldRenderAgentBubble(centerThread.messages, msg)) return null
+                const p = promptById.get(msg.prompt_id)
+                return (
+                  <ThreadAgentBubble
+                    key={msg.id}
+                    message={msg}
+                    agentLabel={!selectedAgentId ? (p?.display_name || p?.agent_id || undefined) : undefined}
+                  />
+                )
+              }
+              return <ThreadUserBubble key={msg.id} message={msg} />
+            })}
+            {centerThread.messages.length === 0 && (
               <p className="text-sm text-hub-text-muted italic text-center py-8">
-                No pending questions. Agents will post here when they need input.
+                No messages yet. Agent questions and your replies will appear here in order.
               </p>
             )}
+            <div ref={threadEndRef} aria-hidden="true" />
           </div>
         </section>
       </main>
+    </div>
+  )
+}
 
-      <ResizeHandle onMouseDown={rightPane.onMouseDown} onDoubleClick={rightPane.reset} dragging={rightPane.dragging} />
+/* ---- Thread Bubbles ---- */
 
-      {/* Right: History Sidebar */}
-      <aside
-        style={{ width: rightPane.width }}
-        className="flex-shrink-0 px-3 py-4 max-h-[calc(100vh-80px)] overflow-y-auto sticky top-0"
-      >
-        <div className="flex items-center gap-3 mb-3 pb-2 border-b border-hub-border">
-          <h2 className="text-sm font-semibold flex items-center gap-2">
-            History
-            <span className="text-[0.65rem] px-1.5 py-0.5 rounded-lg bg-hub-border text-hub-text-muted">
-              {filteredHistory.length}
-            </span>
-          </h2>
-          <button
-            onClick={() => { setShowHistory(!showHistory); if (!showHistory) fetchHistory() }}
-            className="ml-auto flex items-center gap-1 px-2 py-0.5 rounded-md border border-hub-border text-hub-text-muted text-[0.65rem] hover:border-hub-accent hover:text-hub-text transition-colors select-none"
-          >
-            <span className={`inline-block transition-transform ${showHistory ? 'rotate-180' : ''}`}>▼</span>
-            {showHistory ? ' Hide' : ' Show'}
-          </button>
-        </div>
-
-        {showHistory && (
-          <div className="space-y-2">
-            {filteredHistory.map((p) => (
-              <HistoryCard key={p.id} prompt={p} />
+function ThreadAgentBubble({ message, agentLabel }: { message: ThreadMessage; agentLabel?: string }) {
+  return (
+    <div className="flex justify-start">
+      <div className="max-w-[85%] bg-hub-surface border border-[#21262d] rounded-[10px] px-[18px] py-3.5">
+        {agentLabel && (
+          <div className="text-[0.65rem] text-hub-text-muted mb-1.5">{agentLabel}</div>
+        )}
+        <div
+          className="text-[0.9rem] leading-relaxed text-hub-text markdown-body select-text"
+          dangerouslySetInnerHTML={{ __html: renderMarkdown(message.text) }}
+        />
+        {message.attachments.length > 0 && (
+          <div className="mt-2 flex flex-wrap gap-2">
+            {message.attachments.map((a) => (
+              <a
+                key={a.href}
+                href={a.href}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="text-[0.75rem] text-hub-accent hover:underline"
+              >
+                {a.title ?? a.href}
+              </a>
             ))}
-            {filteredHistory.length === 0 && (
-              <p className="text-[0.75rem] text-hub-text-muted italic text-center py-4">No history yet</p>
-            )}
           </div>
         )}
-      </aside>
+      </div>
+    </div>
+  )
+}
+
+function ThreadUserBubble({ message }: { message: ThreadMessage }) {
+  return (
+    <div className="flex justify-end">
+      <div className="max-w-[85%] bg-[#21262d] border border-hub-border rounded-[10px] px-[18px] py-3.5">
+        <div className="text-[0.85rem] text-hub-green font-medium whitespace-pre-wrap break-words select-text">
+          {message.text || '(no answer)'}
+        </div>
+      </div>
     </div>
   )
 }
@@ -402,57 +489,6 @@ function ResizeHandle({ onMouseDown, onDoubleClick, dragging }: {
         'absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-1 h-8 rounded-full transition-opacity',
         dragging ? 'bg-hub-accent opacity-100' : 'bg-hub-text-muted/40 opacity-0 group-hover:opacity-100',
       )} />
-    </div>
-  )
-}
-
-/* ---- History Card ---- */
-
-function HistoryCard({ prompt }: { prompt: Prompt }) {
-  const [open, setOpen] = useState(false)
-  const agentLabel = prompt.display_name || prompt.agent_id || 'system'
-  const isInfo = prompt.type === 'info'
-  const firstLine = (prompt.prompt.split('\n')[0] ?? '').replace(/^#+\s*/, '').slice(0, 100)
-  const answerPreview = (prompt.answer || '').slice(0, 60)
-
-  return (
-    <div className="bg-hub-surface border border-[#21262d] rounded-[10px] px-[18px] py-3.5 opacity-70 hover:opacity-90 transition-opacity">
-      <div
-        className="flex items-center gap-2.5 cursor-pointer"
-        onClick={() => setOpen(!open)}
-      >
-        {!open && (
-          <span className="text-[0.85rem] text-hub-text overflow-hidden text-ellipsis whitespace-nowrap flex-1 min-w-0">
-            {firstLine}
-          </span>
-        )}
-        {open && <span className="flex-1" />}
-        <div className="flex items-center gap-3 flex-shrink-0 text-[0.7rem] text-[#484f58] flex-wrap">
-          <span>{new Date(prompt.created_at).toLocaleTimeString()}</span>
-          <span>{agentLabel}</span>
-          {isInfo
-            ? <span className="text-hub-accent">info report</span>
-            : answerPreview && <span className="text-hub-green font-medium">{answerPreview}{(prompt.answer || '').length > 60 ? '...' : ''}</span>
-          }
-        </div>
-        <span className={`text-[0.7rem] text-[#484f58] flex-shrink-0 transition-transform duration-200 ${open ? 'rotate-180' : ''}`}>▼</span>
-      </div>
-
-      {open && (
-        <div className="mt-2.5 pt-2.5 border-t border-[#21262d] select-text">
-          <div
-            className="text-[0.9rem] leading-relaxed text-hub-text markdown-body mb-3"
-            dangerouslySetInnerHTML={{ __html: renderMarkdown(prompt.prompt) }}
-          />
-          <div className="mt-2 pt-2 border-t border-[#21262d]">
-            <span className="text-[0.7rem] text-[#484f58]">Answer: </span>
-            {isInfo
-              ? <span className="text-[0.7rem] text-hub-accent">info report</span>
-              : <span className="text-[0.85rem] text-hub-green font-medium whitespace-pre-wrap break-words">{prompt.answer || '(no answer)'}</span>
-            }
-          </div>
-        </div>
-      )}
     </div>
   )
 }
