@@ -13,7 +13,9 @@ describe('p2 http wiring (source-level)', () => {
   });
 
   it('registers html-source MCP tool before createMcpServerForHub return', () => {
-    expect(src).toMatch(/registerHtmlSourceTool\s*\(\s*server\s*,\s*\{\s*mirrorRoot\s*\}\s*\)/);
+    expect(src).toMatch(
+      /registerHtmlSourceTool\s*\(\s*server\s*,\s*\{\s*hubDb\s*,\s*store\s*,\s*fallbackRoot:\s*mirrorRoot\s*\}\s*\)/,
+    );
 
     const registerIdx = src.indexOf('registerHtmlSourceTool');
     expect(registerIdx).toBeGreaterThanOrEqual(0);

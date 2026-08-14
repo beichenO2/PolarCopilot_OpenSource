@@ -1,6 +1,8 @@
 import { existsSync, readFileSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
+import type { HubDb } from '../persistence/db.js';
+import { resolveDesignRoot } from './resolve-design-root.js';
 
 export type LoadDesignHtmlSourceResult =
   | { ok: true; path: '_design/index.html'; html: string }
@@ -33,7 +35,11 @@ export function loadDesignHtmlSource(mirrorRoot: string): LoadDesignHtmlSourceRe
 
 export function registerHtmlSourceTool(
   server: { registerTool: McpServer['registerTool'] },
-  opts: { mirrorRoot: string },
+  opts: {
+    hubDb: HubDb;
+    store: { getSessionByMcpId: (id: string) => { agentId: string } | undefined };
+    fallbackRoot: string;
+  },
 ): void {
   server.registerTool(
     'read_html_source',
@@ -50,7 +56,27 @@ export function registerHtmlSourceTool(
         };
       }
 
-      const result = loadDesignHtmlSource(opts.mirrorRoot);
+      const session = opts.store.getSessionByMcpId(sessionId);
+      if (!session) {
+        return {
+          content: [{ type: 'text', text: JSON.stringify({ ok: false, error: 'not_registered' }) }],
+          isError: true,
+        };
+      }
+
+      const resolved = resolveDesignRoot({
+        hubDb: opts.hubDb,
+        agentId: session.agentId,
+        fallbackRoot: opts.fallbackRoot,
+      });
+      if (!resolved.ok) {
+        return {
+          content: [{ type: 'text', text: JSON.stringify(resolved) }],
+          isError: true,
+        };
+      }
+
+      const result = loadDesignHtmlSource(resolved.root);
       if (!result.ok) {
         return {
           content: [{ type: 'text', text: JSON.stringify(result) }],

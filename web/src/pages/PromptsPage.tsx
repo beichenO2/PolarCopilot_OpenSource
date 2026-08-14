@@ -347,7 +347,7 @@ export function PromptsPage() {
           </div>
 
           {/* Topics: draggable to Pending cards */}
-          <TopicsPanel mode="reference" />
+          <TopicsPanel mode="reference" agentId={selectedAgentId} />
         </aside>
 
       <ResizeHandle onMouseDown={leftPane.onMouseDown} onDoubleClick={leftPane.reset} dragging={leftPane.dragging} />

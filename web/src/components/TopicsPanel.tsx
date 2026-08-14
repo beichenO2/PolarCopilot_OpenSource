@@ -6,9 +6,10 @@ import { TopicHtmlViewer } from './TopicHtmlViewer'
 interface Props {
   /** collect: SSoT页，接收批注拖入；reference: PromptsPage，主题可拖出到Pending */
   mode: 'collect' | 'reference'
+  agentId?: string | null
 }
 
-export function TopicsPanel({ mode }: Props) {
+export function TopicsPanel({ mode, agentId }: Props) {
   const { topics, addTopic, removeTopic, renameTopic, addAnnotationToTopic, removeAnnotationFromTopic } =
     useTopicsStore()
 
@@ -91,7 +92,7 @@ export function TopicsPanel({ mode }: Props) {
         </div>
       )}
 
-      <TopicHtmlViewer />
+      <TopicHtmlViewer agentId={agentId} />
 
       {/* Topic list */}
       <div className="space-y-1.5 px-1">

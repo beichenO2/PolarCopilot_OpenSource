@@ -1,4 +1,4 @@
-import { mkdtempSync, rmSync } from 'node:fs';
+import { existsSync, mkdtempSync, mkdirSync, rmSync } from 'node:fs';
 import type { Server } from 'node:http';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -43,6 +43,7 @@ async function startHarness(): Promise<TestHarness> {
   const tmp = mkdtempSync(join(tmpdir(), 'pc-hub-p2-surface-'));
   const dbPath = join(tmp, 'hub.sqlite');
   const mirrorRoot = join(tmp, 'mirror');
+  mkdirSync(mirrorRoot, { recursive: true });
   const { sqlite, db } = createHubDatabase(dbPath);
 
   const app = express();

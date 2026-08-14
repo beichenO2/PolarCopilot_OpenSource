@@ -9,6 +9,18 @@ describe('topicHtmlApiPath', () => {
   it('encodes spaces in topic id', () => {
     expect(topicHtmlApiPath('a b')).toBe('/api/ui/topics/a%20b/html')
   })
+
+  it('omits agent_id when agentId is absent or empty', () => {
+    expect(topicHtmlApiPath('_design')).toBe('/api/ui/topics/_design/html')
+    expect(topicHtmlApiPath('_design', null)).toBe('/api/ui/topics/_design/html')
+    expect(topicHtmlApiPath('_design', '')).toBe('/api/ui/topics/_design/html')
+  })
+
+  it('appends encoded agent_id when agentId is provided', () => {
+    expect(topicHtmlApiPath('_design', 'agent/1')).toBe(
+      '/api/ui/topics/_design/html?agent_id=agent%2F1',
+    )
+  })
 })
 
 describe('isDesignTopicId', () => {

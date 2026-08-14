@@ -1,11 +1,20 @@
 import { existsSync, mkdirSync, readFileSync, readdirSync, unlinkSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import express, { type Express } from 'express';
+import express, { type Express, type Request } from 'express';
+import { type HubDb } from '../persistence/db.js';
+import { resolveDesignRoot, type ResolveDesignRootResult } from './resolve-design-root.js';
 
 const TOPIC_ID_RE = /^[A-Za-z0-9._-]+$/;
 
 export interface MountTopicHtmlOptions {
   rootDir: string;
+  hubDb: HubDb;
+}
+
+function resolveRequestRoot(req: Request, opts: MountTopicHtmlOptions): ResolveDesignRootResult {
+  const q = req.query.agent_id;
+  const agentId = typeof q === 'string' && q.length > 0 ? q : undefined;
+  return resolveDesignRoot({ hubDb: opts.hubDb, agentId, fallbackRoot: opts.rootDir });
 }
 
 export function isValidTopicId(topicId: string): boolean {
@@ -36,14 +45,19 @@ function removeExtraHtmlFiles(rootDir: string, topicId: string): void {
 }
 
 export function mountTopicHtml(app: Express, opts: MountTopicHtmlOptions): void {
-  const { rootDir } = opts;
-
   app.put('/api/ui/topics/:topicId/html', express.json(), (req, res) => {
     const topicId = req.params.topicId;
     if (!topicId || !isValidTopicId(topicId)) {
       res.status(400).json({ error: 'invalid_topic_id' });
       return;
     }
+
+    const resolved = resolveRequestRoot(req, opts);
+    if (!resolved.ok) {
+      res.status(404).json({ error: resolved.error });
+      return;
+    }
+    const rootDir = resolved.root;
 
     const body = req.body as { html?: unknown; filename?: unknown };
     if (typeof body.html !== 'string') {
@@ -70,6 +84,13 @@ export function mountTopicHtml(app: Express, opts: MountTopicHtmlOptions): void 
       res.status(400).json({ error: 'invalid_topic_id' });
       return;
     }
+
+    const resolved = resolveRequestRoot(req, opts);
+    if (!resolved.ok) {
+      res.status(404).json({ error: resolved.error });
+      return;
+    }
+    const rootDir = resolved.root;
 
     const filePath = indexPath(rootDir, topicId);
     if (!existsSync(filePath)) {

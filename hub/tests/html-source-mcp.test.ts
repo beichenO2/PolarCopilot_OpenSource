@@ -1,7 +1,13 @@
 import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import {
+  createHubDatabase,
+  projectOwnership,
+  type HubDb,
+  type HubSqlite,
+} from '../src/persistence/db.js';
 import { loadDesignHtmlSource, registerHtmlSourceTool } from '../src/ui/html-source-mcp.js';
 
 describe('loadDesignHtmlSource', () => {
@@ -71,19 +77,43 @@ describe('loadDesignHtmlSource', () => {
 });
 
 describe('registerHtmlSourceTool', () => {
+  let sqlite: HubSqlite;
+  let hubDb: HubDb;
+  let dbPath: string;
+  let tmpBase: string;
+  let fallbackRoot: string;
+  let projectRoot: string;
   const roots: string[] = [];
 
+  const store = {
+    getSessionByMcpId: (id: string) => (id === 's1' ? { agentId: 'agent-ps' } : undefined),
+  };
+
+  beforeEach(() => {
+    tmpBase = mkdtempSync(join(tmpdir(), 'html-source-mcp-'));
+    roots.push(tmpBase);
+    dbPath = join(tmpBase, 'hub.sqlite');
+    ({ sqlite, db: hubDb } = createHubDatabase(dbPath));
+    fallbackRoot = mkdtempSync(join(tmpdir(), 'html-source-fallback-'));
+    projectRoot = mkdtempSync(join(tmpdir(), 'html-source-project-'));
+    roots.push(fallbackRoot, projectRoot);
+  });
+
   afterEach(() => {
+    try {
+      sqlite.close();
+    } catch {
+      /* ignore */
+    }
     roots.splice(0).forEach((root) => rmSync(root, { recursive: true, force: true }));
   });
 
-  it('registers read_html_source and handles session / file states', async () => {
-    const mirrorRoot = mkdtempSync(join(tmpdir(), 'html-source-mcp-'));
-    roots.push(mirrorRoot);
-    const html = '<!doctype html><html><body>mcp design</body></html>';
-    mkdirSync(join(mirrorRoot, '_design'), { recursive: true });
-    writeFileSync(join(mirrorRoot, '_design', 'index.html'), html, 'utf8');
+  function writeDesignHtml(root: string, html: string): void {
+    mkdirSync(join(root, '_design'), { recursive: true });
+    writeFileSync(join(root, '_design', 'index.html'), html, 'utf8');
+  }
 
+  function registerAndGetHandler() {
     const calls: Array<{ name: string; def: unknown; handler: Function }> = [];
     const server = {
       registerTool: (name: string, def: unknown, handler: Function) => {
@@ -91,7 +121,7 @@ describe('registerHtmlSourceTool', () => {
       },
     };
 
-    registerHtmlSourceTool(server as any, { mirrorRoot });
+    registerHtmlSourceTool(server as any, { hubDb, store, fallbackRoot });
 
     expect(calls[0]!.name).toBe('read_html_source');
     expect(calls[0]!.def).toMatchObject({
@@ -99,20 +129,65 @@ describe('registerHtmlSourceTool', () => {
       inputSchema: {},
     });
 
-    const handler = calls[0]!.handler;
+    return calls[0]!.handler;
+  }
+
+  it('returns missing_session_id when sessionId is absent', async () => {
+    const handler = registerAndGetHandler();
 
     const missingSession = await handler({}, { sessionId: undefined });
     expect(missingSession).toEqual({
       content: [{ type: 'text', text: JSON.stringify({ ok: false, error: 'missing_session_id' }) }],
       isError: true,
     });
+  });
 
+  it('returns not_registered when session is unknown', async () => {
+    const handler = registerAndGetHandler();
+
+    const notRegistered = await handler({}, { sessionId: 'unknown' });
+    expect(notRegistered).toEqual({
+      content: [{ type: 'text', text: JSON.stringify({ ok: false, error: 'not_registered' }) }],
+      isError: true,
+    });
+  });
+
+  it('returns ownership project html instead of fallbackRoot', async () => {
+    const fallbackHtml = '<html>fallback design</html>';
+    const projectHtml = '<html>ownership project design</html>';
+    writeDesignHtml(fallbackRoot, fallbackHtml);
+    writeDesignHtml(projectRoot, projectHtml);
+
+    hubDb
+      .insert(projectOwnership)
+      .values({
+        projectName: 'owned-proj',
+        agentId: 'agent-ps',
+        projectPath: projectRoot,
+        registeredAt: new Date('2026-01-01T00:00:00Z'),
+      })
+      .run();
+
+    const handler = registerAndGetHandler();
     const ok = await handler({}, { sessionId: 's1' });
+
     expect(JSON.parse((ok.content as Array<{ text: string }>)[0]!.text)).toEqual({
       ok: true,
       path: '_design/index.html',
-      html,
+      html: projectHtml,
     });
     expect(ok.isError).toBeUndefined();
+  });
+
+  it('returns no_ownership isError even when fallbackRoot has design html', async () => {
+    writeDesignHtml(fallbackRoot, '<html>fallback design</html>');
+
+    const handler = registerAndGetHandler();
+    const result = await handler({}, { sessionId: 's1' });
+
+    expect(result).toEqual({
+      content: [{ type: 'text', text: JSON.stringify({ ok: false, error: 'no_ownership' }) }],
+      isError: true,
+    });
   });
 });

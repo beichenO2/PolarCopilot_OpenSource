@@ -6,7 +6,11 @@ type LoadState =
   | { kind: 'empty' }
   | { kind: 'ready'; html: string }
 
-export function TopicHtmlViewer() {
+type TopicHtmlViewerProps = {
+  agentId?: string | null
+}
+
+export function TopicHtmlViewer({ agentId }: TopicHtmlViewerProps = {}) {
   const [state, setState] = useState<LoadState>({ kind: 'loading' })
 
   useEffect(() => {
@@ -14,7 +18,7 @@ export function TopicHtmlViewer() {
 
     async function load() {
       try {
-        const resp = await fetch(topicHtmlApiPath(DESIGN_TOPIC_ID))
+        const resp = await fetch(topicHtmlApiPath(DESIGN_TOPIC_ID, agentId))
         if (cancelled) return
         if (!resp.ok) {
           setState({ kind: 'empty' })
@@ -32,7 +36,7 @@ export function TopicHtmlViewer() {
     return () => {
       cancelled = true
     }
-  }, [])
+  }, [agentId])
 
   return (
     <div className="px-2 mb-3">

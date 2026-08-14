@@ -2,15 +2,18 @@ import express from 'express';
 import { existsSync, mkdtempSync, rmSync, readdirSync, writeFileSync, mkdirSync } from 'node:fs';
 import type { Server } from 'node:http';
 import { tmpdir } from 'node:os';
-import { dirname, join } from 'node:path';
+import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
+import { createHubDatabase, projectOwnership, type HubDb } from '../src/persistence/db.js';
 import { isValidTopicId, mountTopicHtml } from '../src/ui/topic-html.js';
 
 type RunningServer = { baseUrl: string; close: () => Promise<void> };
 
 async function startTopicHtmlServer(rootDir: string): Promise<RunningServer> {
+  const { sqlite, db } = createHubDatabase(':memory:');
+
   const app = express();
-  mountTopicHtml(app, { rootDir });
+  mountTopicHtml(app, { rootDir, hubDb: db });
 
   let server: Server;
   const baseUrl = await new Promise<string>((resolve, reject) => {
@@ -27,10 +30,32 @@ async function startTopicHtmlServer(rootDir: string): Promise<RunningServer> {
 
   const close = () =>
     new Promise<void>((resolve, reject) => {
-      server.close((err) => (err ? reject(err) : resolve()));
+      server.close((err) => {
+        try {
+          sqlite.close();
+        } catch {
+          /* ignore */
+        }
+        if (err) reject(err);
+        else resolve();
+      });
     });
 
   return { baseUrl, close };
+}
+
+function insertProjectOwnership(
+  db: HubDb,
+  row: { agentId: string; projectPath: string; projectName?: string; registeredAt?: Date },
+): void {
+  db.insert(projectOwnership)
+    .values({
+      agentId: row.agentId,
+      projectPath: row.projectPath,
+      projectName: row.projectName ?? 'test-project',
+      registeredAt: row.registeredAt ?? new Date(),
+    })
+    .run();
 }
 
 function htmlFilesInTopic(rootDir: string, topicId: string): string[] {
@@ -174,10 +199,11 @@ describe('mountTopicHtml', () => {
   it.each(['.', '..'] as const)(
     'rejects path-traversal topicId %j with 400 and does not write outside rootDir',
     async (topicId) => {
-      const rootDir = mkdtempSync(join(tmpdir(), 'topic-html-'));
-      roots.push(rootDir);
-      const parentDir = dirname(rootDir);
-      const parentBefore = readdirSync(parentDir);
+      const sandbox = mkdtempSync(join(tmpdir(), 'topic-html-sandbox-'));
+      roots.push(sandbox);
+      const rootDir = join(sandbox, 'root');
+      mkdirSync(rootDir);
+      const parentBefore = readdirSync(sandbox);
       const server = await startTopicHtmlServer(rootDir);
 
       try {
@@ -195,7 +221,7 @@ describe('mountTopicHtml', () => {
 
         expect(existsSync(join(rootDir, 'index.html'))).toBe(false);
         expect(readdirSync(rootDir)).toEqual([]);
-        expect(readdirSync(parentDir)).toEqual(parentBefore);
+        expect(readdirSync(sandbox)).toEqual(parentBefore);
       } finally {
         await server.close();
       }
@@ -240,6 +266,80 @@ describe('mountTopicHtml', () => {
       });
       expect(putResp.status).toBe(200);
       expect(htmlFilesInTopic(rootDir, topicId)).toEqual(['index.html']);
+    } finally {
+      await server.close();
+    }
+  });
+
+  it('GET with agent_id resolves owned project root, not mount rootDir', async () => {
+    const rootDir = mkdtempSync(join(tmpdir(), 'topic-html-'));
+    roots.push(rootDir);
+    const agentProjectRoot = mkdtempSync(join(tmpdir(), 'topic-html-agent-'));
+    roots.push(agentProjectRoot);
+
+    const mountHtml = '<!doctype html><html><body>mount-root-design</body></html>';
+    const agentHtml = '<!doctype html><html><body>polarskills-design</body></html>';
+    mkdirSync(join(rootDir, '_design'), { recursive: true });
+    writeFileSync(join(rootDir, '_design', 'index.html'), mountHtml, 'utf8');
+    mkdirSync(join(agentProjectRoot, '_design'), { recursive: true });
+    writeFileSync(join(agentProjectRoot, '_design', 'index.html'), agentHtml, 'utf8');
+
+    const dbPath = join(rootDir, '.hub-test.sqlite');
+    const { sqlite, db } = createHubDatabase(dbPath);
+    insertProjectOwnership(db, {
+      agentId: 'agent-ps',
+      projectPath: agentProjectRoot,
+      projectName: 'polarskills',
+    });
+
+    const app = express();
+    mountTopicHtml(app, { rootDir, hubDb: db });
+
+    let server: Server;
+    const baseUrl = await new Promise<string>((resolve, reject) => {
+      server = app.listen(0, '127.0.0.1', () => {
+        const addr = server.address();
+        if (addr && typeof addr === 'object') {
+          resolve(`http://127.0.0.1:${addr.port}`);
+        } else {
+          reject(new Error('no listen address'));
+        }
+      });
+      server.on('error', reject);
+    });
+
+    try {
+      const agentResp = await fetch(`${baseUrl}/api/ui/topics/_design/html?agent_id=agent-ps`);
+      expect(agentResp.status).toBe(200);
+      expect(await agentResp.text()).toBe(agentHtml);
+
+      const fallbackResp = await fetch(`${baseUrl}/api/ui/topics/_design/html`);
+      expect(fallbackResp.status).toBe(200);
+      expect(await fallbackResp.text()).toBe(mountHtml);
+    } finally {
+      await new Promise<void>((resolve, reject) => {
+        server.close((err) => {
+          try {
+            sqlite.close();
+          } catch {
+            /* ignore */
+          }
+          if (err) reject(err);
+          else resolve();
+        });
+      });
+    }
+  });
+
+  it('GET with unknown agent_id returns 404 no_ownership', async () => {
+    const rootDir = mkdtempSync(join(tmpdir(), 'topic-html-'));
+    roots.push(rootDir);
+    const server = await startTopicHtmlServer(rootDir);
+
+    try {
+      const resp = await fetch(`${server.baseUrl}/api/ui/topics/_design/html?agent_id=unknown`);
+      expect(resp.status).toBe(404);
+      expect(await resp.json()).toEqual({ error: 'no_ownership' });
     } finally {
       await server.close();
     }

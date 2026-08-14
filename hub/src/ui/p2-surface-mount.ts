@@ -8,5 +8,5 @@ export function mountP2Surface(
   opts: { hubDb: HubDb; mirrorRoot: string },
 ): void {
   mountPromptThread(app, opts.hubDb);
-  mountTopicHtml(app, { rootDir: opts.mirrorRoot });
+  mountTopicHtml(app, { rootDir: opts.mirrorRoot, hubDb: opts.hubDb });
 }

@@ -2285,7 +2285,7 @@ function createMcpServerForHub(deps: {
     },
   );
 
-  registerHtmlSourceTool(server, { mirrorRoot });
+  registerHtmlSourceTool(server, { hubDb, store, fallbackRoot: mirrorRoot });
   return server;
 }
 
